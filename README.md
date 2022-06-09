@@ -1,6 +1,6 @@
 [![version](https://anonymous-peer12345.github.io/resources/html/version.svg)][static-gl-url] [![pipeline](https://anonymous-peer12345.github.io/resources/html/pipeline.svg)][static-gl-url]
 
-# Flickr Sunset Sunrise grid aggregation & chi
+# Sunset Sunrise grid aggregation & chi
 
 The notebooks are stored as markdown files with [jupytext][1] for better git compatibility.
 
