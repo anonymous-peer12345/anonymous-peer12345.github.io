@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # ---
 # jupyter:
 #   jupytext:
@@ -6,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.11.2
+#       jupytext_version: 1.14.0
 #   kernelspec:
 #     display_name: worker_env
 #     language: python
@@ -19,12 +18,13 @@
 #
 # ----------------
 
-# + tags=["active-ipynb", "hide_code"]
+# + tags=["active-ipynb", "hide_code"] jupyter={"source_hidden": true}
 # from IPython.display import Markdown as md
 # from datetime import date
 #
 # today = date.today()
-# md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+# with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+# md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 # -
 
 # # Introduction
@@ -36,6 +36,8 @@
 # - bias for different metrics (userdays, usercount, postcount)
 #
 # See the [introduction](https://realpython.com/numpy-scipy-pandas-correlation-python/) to Correlation With Python.
+#
+# **TODO:** Notebook cleanup
 
 # # Preparations
 # ## Load dependencies
@@ -184,8 +186,8 @@ def relationship_plot(
     figsize: Tuple[int, int] = (7, 7),
     plot_context: str = "100 km grid bin"):
     """Create relationship plot"""
-    f, ax = plt.subplots(figsize=figsize)
-    f.suptitle(
+    fig, ax = plt.subplots(figsize=figsize)
+    fig.suptitle(
         title,
         fontsize=12, y=0)
     scatterplot_kwarg = {
@@ -317,69 +319,52 @@ def rank_cols(grid: pd.DataFrame, topic1="sunset", topic2="sunrise", metric_col 
 
 # -
 
-# ## Relationship between values from Sunset and Sunrise
+# ## Relationship between values from Sunset and Sunrise (100km grid)
+#
+# We'll use ranked comparison for the relationship plots below.
 
-grid = grid_agg_fromcsv(OUTPUT / "csv" / "flickr_sunrise_est.csv")
+grid_sunrise = grid_agg_fromcsv(OUTPUT / "csv" / "flickr_sunrise_est.csv")
+grid_sunset = grid_agg_fromcsv(OUTPUT / "csv" / "flickr_sunset_est.csv")
 
-grid.head()
-
-grid[f'postcount_rank'] = rank_series(grid[f'postcount_est'])
-grid[f'userdays_rank'] = rank_series(grid[f'userdays_est'])
-grid[f'usercount_rank'] = rank_series(grid[f'usercount_est'])
-
-postcount_mask = grid[f'userdays_rank'] < 20
-usercount_mask = grid[f'usercount_rank'] < 20
-small_mask = (
-        (sunrise_mask) | (sunset_mask))
-grid.drop(grid[small_mask].index, inplace=True)
-
-title = (
-    f'Relationship between usercount and userdays per grid cell (ranked) \n'
-    'for Sunset from Flickr. ')
-x_col = f'userdays_rank'
-y_col = f'usercount_rank'
-relationship_plot(
-    data=grid, title=title, x_col=x_col, y_col=y_col,
-    x_label=f'Userdays (ranked)', y_label=f'Usercount (ranked)')
-
-# Rename cols before merge:
-
-# Mask small values
-
-grid_sunrise.drop(grid_sunrise[small_mask].index, inplace=True)
-grid_sunset.drop(grid_sunset[small_mask].index, inplace=True)
+grid_sunrise.head()
 
 
-# Rank values:
+# Calculate ranks from absolute numbers.
 
 def rank_cols_dfs(df1, df2, topic1="sunrise", topic2="sunset", metric=METRIC):
     """Rank columns of df_sunset, df_sunrise"""
-    metric_col = f"{metric}_est"
-    df1[f'{metric_col}_{topic1}_rank'] = rank_series(
-       df1[f'postcount'])
-    df2[f'{metric_col}_{topic2}_rank'] = rank_series(
-       df2[f'{metric_col}_{topic2}'])
+    metric_col = metric
+    if metric != "chi_value":
+        metric_col = f"{metric}_est"
+    df1[f'{metric}_{topic1}_rank'] = rank_series(
+       df1[metric_col])
+    df2[f'{metric}_{topic2}_rank'] = rank_series(
+       df2[metric_col])
+
+
 rank_cols_dfs(grid_sunrise, grid_sunset, metric=METRIC)
 
 
-# Merge into single dataframe
+# Merge
 
-def merge_df(df1, df2, topic1="sunrise", topic2="sunset", metric=METRIC) -> pd.DataFrame:
+def merge_df_topics(df1, df2, topic1="sunrise", topic2="sunset", metric=METRIC, ranked: bool = True) -> pd.DataFrame:
     """Merge sunset and sunrise/ flickr and instagram values"""
-    metric_col = f"{metric}_est"
-    df = df1[[f'{metric_col}_{topic1}_rank']].merge(
-        df2[[f'{metric_col}_{topic2}_rank']],
+    _rank = ""
+    if ranked:
+        _rank = "_rank"
+    df = df1[[f'{metric}_{topic1}{_rank}']].merge(
+        df2[[f'{metric}_{topic2}{_rank}']],
         left_index=True, right_index=True)
     return df
 
 
-grid = merge_df(grid_sunrise, grid_sunset, metric=METRIC)
+grid = merge_df_topics(grid_sunrise, grid_sunset, metric=METRIC)
 
 title = (
     f'Relationship between {METRIC} per grid cell (ranked) \n'
     'for Sunset and Sunrise from Flickr. ')
-x_col = f'{METRIC_COL}_sunset_rank'
-y_col = f'{METRIC_COL}_sunrise_rank'
+x_col = f'{METRIC}_sunset_rank'
+y_col = f'{METRIC}_sunrise_rank'
 relationship_plot(
     data=grid, title=title, x_col=x_col, y_col=y_col,
     x_label=f'{METRIC.title()} Sunset (ranked)', y_label=f'{METRIC.title()} Sunrise (ranked)')
@@ -392,7 +377,8 @@ grid_flickr = chimaps_fromcsv(
 
 instagram_args = {
     "csv_observed_plus":"instagram_sunset_est.csv",
-    "csv_observed_minus":"instagram_sunrise_est.csv"}
+    "csv_observed_minus":"instagram_sunrise_est.csv",
+    "csv_expected":"instagram_random_est.csv"}
 grid_instagram = chimaps_fromcsv(
     plot=False, chi_column=METRIC_COL, normalize=False, **instagram_args)
 
@@ -472,9 +458,6 @@ print(Covariance)
 # ## Relationships on Country aggregate
 #
 # Instead of using 100 km bins, relationships can also be studied for country level aggregate data (chi, total, expected etc.).
-# We use this here to see 
-# - if there are metric biases (postcount/userdays/usercount) observable on the country scale, or if aggregation mitigates the issue of metric-noise (Figure 7 in the paper)
-# - if there are any classes of countries that stand out, e.g. "tourist" and "origin" countries, or sunset and sunrise countries (Figure 8 in the paper)
 
 # ### Load Flickr country data for sunset/sunrise
 
@@ -488,36 +471,34 @@ def load_country_csv(
     return df
 
 
-df_usercount = load_country_csv(topic="sunrise", source="flickr", metric="usercount")
+df_sunrise = load_country_csv(topic="sunrise", source="flickr", metric="usercount")
 
-df_usercount.head()
+df_sunrise.head()
 
-df_userdays = load_country_csv(topic="sunrise", source="flickr", metric="userdays")
+df_sunset = load_country_csv(topic="sunset", source="flickr", metric="usercount")
 
-df_userdays.head()
+df_sunset.head()
 
-df_userdays[f'userdays_rank'] = rank_series(df_userdays['userdays_est'])
-df_usercount[f'usercount_rank'] = rank_series(df_usercount['usercount_est'])
+rank_cols_dfs(df_sunrise, df_sunset, metric=METRIC)
 
-df = df_userdays[[f'userdays_rank']].merge(
-        df_usercount[[f'usercount_rank']],
-        left_index=True, right_index=True)
+df = merge_df_topics(df_sunrise, df_sunset, metric=METRIC)
 
 # Replace NaN values with 0:
 
 df.fillna(0, inplace=True)
+
+df.head()
 
 # ### Visualize
 
 # +
 f, ax = plt.subplots(figsize=(7, 7))
 
-x_col = f'userdays_rank'
-y_col = f'usercount_rank'
+x_col = f'{METRIC}_sunrise_rank'
+y_col = f'{METRIC}_sunset_rank'
 
 f.suptitle(
-    f'Relationship between userdays and usercount (ranked) for Flickr '
-    ' (Sunrise).',
+    f'Relationship between sunset and sunrise (usercount, ranked) for Flickr',
     fontsize=12, y=0)
 
 scatterplot_kwarg = {
@@ -538,8 +519,8 @@ annotate(
     y_col=y_col,
     ranked=True)
 
-ax.set_xlabel(f'Userdays (ranked)')
-ax.set_ylabel(f'Usercount (ranked)')
+ax.set_xlabel(f'Usercount Sunrise (ranked)')
+ax.set_ylabel(f'Usercount Sunset (ranked)')
 # -
 
 # See if there is any conglomeration for European Countries and US/Canada.
@@ -568,7 +549,7 @@ world_su = world_su.to_crs(CRS_PROJ)
 def drop_cols_except(df: pd.DataFrame, columns_keep: List[str]):
     """Drop all columns from DataFrame except those specified in cols_except"""
     df.drop(
-        df.columns.difference(columns_keep), 1, inplace=True)
+        df.columns.difference(columns_keep), axis=1, inplace=True)
 
 
 columns_keep = ['geometry','ADMIN', 'SU_A3']
@@ -612,9 +593,8 @@ def annotate_countries(
 def annotate_countries_adjust(
     df: pd.DataFrame, x_col: str, y_col: str, ax):
     """Annotate map based on a list of countries"""
-    mask_zero = ((df[x_col] == 0) & (df[y_col] == 0))
     texts = []
-    for idx, row in df[~mask_zero].iterrows():
+    for idx, row in df.iterrows():
         texts.append(
              plt.text(
                  s=f'{idx}',
@@ -631,15 +611,21 @@ def annotate_countries_adjust(
 def country_rel_plot(
     df: pd.DataFrame, topic1="flickr", topic2="instagram",
     plot_context="Flickr",
-    store_fig: str = None,
+    filename: str = None,
     output: Path = OUTPUT,
     metric = METRIC,
-    annotate_countries: bool = None):
+    annotate_countries: bool = None,
+    mask_zero: bool = True,
+    add_labels: bool = False,
+    ranked: bool = True):
     """Country chi square relationship plot"""
     fig, ax = plt.subplots(figsize=(7, 7))
     
-    x_col = f'{metric}_est_{topic1}_rank'
-    y_col = f'{metric}_est_{topic2}_rank'
+    _rank = ""
+    if ranked:
+        _rank = "_rank"
+    x_col = f'{metric}_{topic1}{_rank}'
+    y_col = f'{metric}_{topic2}{_rank}'
     
     fig.suptitle(
         f'Relationship between {metric} (ranked) for {topic1} and '
@@ -655,12 +641,16 @@ def country_rel_plot(
     }
     
     if annotate_countries:
+        df_anot = df
+        if mask_zero:
+            _mask_zero = ((df[x_col] == 0) & (df[y_col] == 0))
+            df_anot = df[~_mask_zero]
         g = sns.scatterplot(
-            data=df[df["Europe/North America"] == False],
+            data=df_anot[df_anot["Europe/North America"] == False],
             color="grey", label="Country (su_a3)",
             **scatterplot_kwarg)
         g = sns.scatterplot(
-            data=df[df["Europe/North America"] == True],
+            data=df_anot[df_anot["Europe/North America"] == True],
             color="red", label="European Countries \n+ US/Canada",
             **scatterplot_kwarg)
     else:
@@ -673,12 +663,12 @@ def country_rel_plot(
     "facecolors": "none", "linewidth": 0.5,
     "color":"none"}
 
-    ax.set_xlabel(f'{metric.capitalize()} {topic1.capitalize()} (ranked)')
-    ax.set_ylabel(f'{metric.capitalize()} {topic2.capitalize()} (ranked)')
+    ax.set_xlabel(f'{metric.capitalize()} {topic1.capitalize()} {"(ranked)" if _rank else ""}')
+    ax.set_ylabel(f'{metric.capitalize()} {topic2.capitalize()} {"(ranked)" if _rank else ""}')
     
-    if annotate_countries:
+    if annotate_countries and add_labels:
         annotate_countries_adjust(
-            df[(df["Europe/North America"] == True)],
+            df_anot[(df_anot["Europe/North America"] == True)],
             x_col=x_col,
             y_col=y_col,
             ax=ax)    
@@ -687,11 +677,15 @@ def country_rel_plot(
         x_col=x_col,
         y_col=y_col,
         ranked=True)
-    if store_fig:
-        print("Storing figure as png..")
+    if filename:
+        print("Storing figure as png and svg..")
         fig.savefig(
-            output / f"figures" / store_fig, dpi=300, format='PNG',
-            bbox_inches='tight', pad_inches=1)
+            output / f"figures" / f"{filename}.png", dpi=300, format='PNG',
+            bbox_inches='tight', pad_inches=1, facecolor="white")
+        # also save as svg
+        fig.savefig(
+            output / "svg" / f"{filename}.svg", format='svg',
+            bbox_inches='tight', pad_inches=1, facecolor="white")
 
 
 def annotate_locations(
@@ -732,65 +726,78 @@ def annotate_records_adjust(
                         color='r', lw=0.5, alpha=0.5))
 
 
+df[df["Europe/North America"]].head()
+
 # Plot map
 
-country_rel_plot(df, plot_context="Sunrise", store_fig="flickr_instagram_relationship_countries_sunrise.png", metric=METRIC)
+country_rel_plot(
+    df, plot_context="Flickr", topic1="sunrise", topic2="sunset", annotate_countries=True,
+    filename="sunrise_sunset_relationship_countries_flickr", metric=METRIC)
 
-# ### Repeat for Postcount and Userdays
+# ### Repeat for Instagram
+#
+# sunset/sunrise
 
-# Here, we compare reliability for results with usercount and results for userdays and postcount
+METRIC = "usercount"
+load_kwds = {"topic":"sunrise", "source":"instagram"}
+df_sunrise = load_country_csv(metric=METRIC, **load_kwds)
 
-METRIC = "userdays"
+load_kwds["topic"] = "sunset"
+df_sunset = load_country_csv(metric=METRIC, **load_kwds)
+
+
+def rename_cols(df1, df2, topic1="sunset", topic2="sunrise", metric=METRIC):
+    """Rename columns of for two topic comparison
+    E.g.: sunset, sunrise; flickr, instagram
+    """
+    df1.rename(columns={
+        f'{metric}':f'{metric}_{topic1}'}, inplace=True)
+    df2.rename(columns={
+        f'{metric}':f'{metric}_{topic2}'}, inplace=True)
+
+
+def join_dfs_apply(df1, df2, topic1="flickr", topic2="instagram", metric=METRIC, ranked: bool = True) -> pd.DataFrame:
+    """Join sunset and sunrise df chi"""
+    if ranked:
+        rank_cols_dfs(df1, df2, topic1, topic2, metric=metric)
+    else:
+        rename_cols(df1, df2, topic1, topic2, metric=metric)
+    df = merge_df_topics(df1, df2, topic1, topic2, metric=metric, ranked=ranked)    
+    df.fillna(0, inplace=True)
+    spatial_join_area(df, cont_sel)
+    return df
+
+
+df = join_dfs_apply(df_sunrise, df_sunset, topic1="sunrise", topic2="sunset", metric=METRIC)
+
+country_rel_plot(
+    df, plot_context=f"{load_kwds.get('source').title()}", topic1="sunrise", topic2="sunset", annotate_countries=True,
+    filename=f"sunrise_sunset_relationship_countries_instagram", metric=METRIC)
+
+# ### Repeat for Instagram and Flickr
+
+# Here, we compare reliability for results with usercount for Instagram and Flickr
+
+METRIC = "usercount"
 load_kwds = {"topic":"sunrise", "source":"flickr"}
 df_flickr = load_country_csv(metric=METRIC, **load_kwds)
 
 load_kwds["source"] = "instagram"
 df_instagram = load_country_csv(metric=METRIC, **load_kwds)
 
-
 # Repeat the process equal to Flickr, afterwards plot:
 
-def join_dfs_apply(df1, df2, topic1="flickr", topic2="instagram", metric=METRIC) -> pd.DataFrame:
-    """Join sunset and sunrise df chi"""
-    rename_cols(df1, df2, topic1, topic2, metric=metric)
-    rank_cols_dfs(df1, df2, topic1, topic2, metric=metric)
-    df = merge_df(df1, df2, topic1, topic2, metric=metric)
-    df.fillna(0, inplace=True)
-    spatial_join_area(df, cont_sel)
-    return df
-df = join_dfs_apply(df_flickr, df_instagram, metric=METRIC)
-
-country_rel_plot(df, plot_context="Sunrise", store_fig="flickr_instagram_relationship_countries_userdays.png", metric=METRIC)
-
-METRIC = "postcount"
-load_kwds = {"topic":"sunset", "source":"flickr"}
-df_sunset = load_country_csv(metric=METRIC, **load_kwds)
-
-load_kwds["source"] = "instagram"
-df_instagram = load_country_csv(metric=METRIC, **load_kwds)
-
-
-def join_dfs_apply(df1, df2, topic1="sunset", topic2="sunrise", metric=METRIC) -> pd.DataFrame:
-    """Join sunset and sunrise df chi"""
-    rename_cols(df1, df2, topic1, topic2, metric=metric)
-    rank_cols_dfs(df1, df2, topic1, topic2, metric=metric)
-    df = merge_df(df1, df2, topic1, topic2, metric=metric)
-    df.fillna(0, inplace=True)
-    spatial_join_area(df, cont_sel)
-    return df
-
-
-df = join_dfs_apply(df_sunset, df_sunrise, metric=METRIC)
+df = join_dfs_apply(df_flickr, df_instagram, topic1="flickr", topic2="instagram", metric=METRIC)
 
 country_rel_plot(
-    df, plot_context="Flickr", store_fig="sunrise_sunset_relationship_countries_postcount.png", 
-    metric=METRIC, annotate_countries=True)
+    df, plot_context=f"Sunrise reactions", annotate_countries=True, topic1="flickr", topic2="instagram",
+    filename=f"instagram_flickr_relationship_countries_sunrise", metric=METRIC)
 
 # ### Repeat for Instagram/Flickr bias
 
 METRIC = 'usercount'
 METRIC_COL = 'usercount_est'
-load_kwds = {"topic":"sunrise", "source":"flickr"}
+load_kwds = {"topic":"sunset", "source":"flickr"}
 df_flickr = load_country_csv(metric="usercount", **load_kwds)
 
 load_kwds["source"] = "instagram"
@@ -803,44 +810,78 @@ df.head()
 
 country_rel_plot(
     df, topic1="flickr", topic2="instagram",
-    plot_context="Sunrise reactions",
-    store_fig="instagram_flickr_relationship_countries_sunrise.png", annotate_countries=True)
+    plot_context="Sunset reactions",
+    filename="instagram_flickr_relationship_countries_sunset", annotate_countries=True)
 
-# Repeat for Sunset:
+# ## Relationships for Chi
+#
+# Besides absolute values, also compare chi values for countries (sunset/sunrise and flickr/instagram)
 
+METRIC = 'usercount'
+METRIC_COL = 'usercount_est'
 load_kwds = {"topic":"sunset", "source":"flickr"}
-df_flickr = load_country_csv(metric="usercount", **load_kwds)
+df_sunset = load_country_csv(metric='usercount', **load_kwds)
+
+load_kwds["topic"] = "sunrise"
+df_sunrise = load_country_csv(metric="usercount", **load_kwds)
+
+df = join_dfs_apply(
+    df_sunrise, df_sunset, topic1="sunrise", topic2="sunset", metric="chi_value", ranked=False)
+
+df.head()
+
+country_rel_plot(
+    df, topic1="sunrise", topic2="sunset", metric='chi_value', ranked=False,
+    plot_context="Chi value Flickr",
+    filename="sunrise_sunset_relationship_countries_flickr_chi", annotate_countries=True)
+
+METRIC = 'usercount'
+METRIC_COL = 'usercount_est'
+load_kwds = {"topic":"sunset", "source":"flickr"}
+df_sunset = load_country_csv(metric='usercount', **load_kwds)
+
+load_kwds["source"] = "instagram"
+df_sunrise = load_country_csv(metric="usercount", **load_kwds)
+
+df = join_dfs_apply(
+    df_sunrise, df_sunset, topic1="sunrise", topic2="sunset", metric="chi_value", ranked=False)
+
+country_rel_plot(
+    df, topic1="sunrise", topic2="sunset", metric='chi_value', ranked=False,
+    plot_context="Chi value Instagram",
+    filename="sunrise_sunset_relationship_countries_instagram_chi", annotate_countries=True)
+
+METRIC = 'usercount'
+METRIC_COL = 'usercount_est'
+load_kwds = {"topic":"sunrise", "source":"flickr"}
+df_flickr = load_country_csv(metric='usercount', **load_kwds)
 
 load_kwds["source"] = "instagram"
 df_instagram = load_country_csv(metric="usercount", **load_kwds)
 
 df = join_dfs_apply(
-    df_flickr, df_instagram, topic1="flickr", topic2="instagram", metric=METRIC)
+    df_flickr, df_instagram, topic1="flickr", topic2="instagram", metric="chi_value", ranked=False)
 
 country_rel_plot(
-    df, topic1="flickr", topic2="instagram",
-    plot_context="Sunset reactions",
-    store_fig="instagram_flickr_relationship_countries_sunset.png", annotate_countries=True)
-
-# ### Repeat for Sunset/Sunrise bias
+    df, topic1="flickr", topic2="instagram", metric='chi_value', ranked=False,
+    plot_context="Chi value Sunrise",
+    filename="instagram_flickr_relationship_countries_sunrise_chi", annotate_countries=True)
 
 METRIC = 'usercount'
 METRIC_COL = 'usercount_est'
-load_kwds = {"topic":"sunrise", "source":"instagram"}
-df_sunrise = load_country_csv(metric="usercount", **load_kwds)
+load_kwds = {"topic":"sunset", "source":"flickr"}
+df_flickr = load_country_csv(metric='usercount', **load_kwds)
 
-load_kwds["topic"] = "sunset"
-df_sunset = load_country_csv(metric="usercount", **load_kwds)
+load_kwds["source"] = "instagram"
+df_instagram = load_country_csv(metric="usercount", **load_kwds)
 
 df = join_dfs_apply(
-    df_sunset, df_sunrise, topic1="sunset", topic2="sunrise", metric=METRIC)
+    df_flickr, df_instagram, topic1="flickr", topic2="instagram", metric="chi_value", ranked=False)
 
 country_rel_plot(
-    df, topic1="sunset", topic2="sunrise",
-    plot_context="Instagram reactions",
-    store_fig="sunset_sunrise_relationship_countries_instagram.png", annotate_countries=True)
-
-# Repeat for Instagram:
+    df, topic1="flickr", topic2="instagram", metric='chi_value', ranked=False,
+    plot_context="Chi value Sunset",
+    filename="instagram_flickr_relationship_countries_sunrise_chi", annotate_countries=True)
 
 # ## Store generated graphics as tabbed HTML
 

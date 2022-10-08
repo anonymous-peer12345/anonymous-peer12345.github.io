@@ -5,7 +5,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.11.2
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: worker_env
     language: python
@@ -24,7 +24,8 @@ from IPython.display import Markdown as md
 from datetime import date
 
 today = date.today()
-md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 ```
 
 Several additional quantities/numbers are collected here and referenced in the article.
@@ -46,7 +47,8 @@ from python_hll.util import NumberUtil
 module_path = str(Path.cwd().parents[0] / "py")
 if module_path not in sys.path:
     sys.path.append(module_path)
-from modules import tools
+from modules import tools, preparations
+from _03_chimaps import OUTPUT
 ```
 
 ## Load HLL aggregate data
@@ -312,6 +314,35 @@ Copy single HTML file to resource folder
 
 ```python
 !cp ../out/html/09_statistics.html ../resources/html/
+```
+
+# Create Release File
+
+
+First convert all svg to pdf, for archive purposes and paper submission.
+
+```python
+WEB_DRIVER = preparations.load_chromedriver()
+```
+
+```python tags=["active-ipynb"]
+%%time
+tools.convert_svg_pdf(in_dir=OUTPUT / "svg", out_dir=OUTPUT / "pdf")
+```
+
+**Create release file with all results**
+
+Create a release file that contains ipynb notebooks, HTML, figures, svg and python converted files.
+
+Make sure that 7z is available (`apt-get install p7zip-full`)
+
+```python tags=["active-ipynb"]
+!cd .. && RELEASE_VERSION=$(git describe --tags --abbrev=0) \
+    && 7z a -tzip -mx=9 out/release_$RELEASE_VERSION.zip \
+    md/* py/* out/html/* out/pdf/* out/svg/* out/figures/* notebooks/*.ipynb \
+    README.md jupytext.toml nbconvert.tpl \
+    -x!py/__pycache__ -x!py/modules/__pycache__ -x!py/modules/.ipynb_checkpoints \
+    -y > /dev/null
 ```
 
 ```python

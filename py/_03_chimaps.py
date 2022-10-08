@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # ---
 # jupyter:
 #   jupytext:
@@ -7,7 +6,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.11.2
+#       jupytext_version: 1.14.0
 #   kernelspec:
 #     display_name: worker_env
 #     language: python
@@ -20,17 +19,18 @@
 #
 # ----------------
 
-# + tags=["hide_code", "active-ipynb"]
+# + tags=["hide_code", "active-ipynb"] jupyter={"source_hidden": true}
 # from IPython.display import Markdown as md
 # from datetime import date
 #
 # today = date.today()
-# md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+# with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+# md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 # -
 
 # # Introduction
 #
-# This is the third notebook in a series of eight notebooks:
+# This is the third notebook in a series of nine notebooks:
 #
 # 1. the grid aggregation notebook (01_gridagg.ipynb) is used to aggregate data from HLL sets at GeoHash 5 to a 100x100km grid  
 # 2. the visualization notebook (02_visualization.ipynb) is used to create interactive maps, with additional information shown on hover
@@ -68,8 +68,11 @@ module_path = str(Path.cwd().parents[0] / "py")
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-from modules import preparations
-preparations.init_imports()
+# + tags=["active-ipynb"]
+# from modules import preparations
+# preparations.init_imports()
+# WEB_DRIVER = preparations.load_chromedriver()
+# -
 
 # **Import visualization notebook**
 
@@ -437,7 +440,7 @@ def compile_diverging_image_layer(
         # classify values for both series
         cmap_name = cmaps_diverging[ix]
         bounds, scheme_breaks = classify_data(
-            values_series=series_nan, scheme=scheme, cmap_name=cmap_name)
+            values_series=series_nan, scheme=scheme)
         div_bounds.append(bounds)
         # assign categories column
         cat_series = scheme_breaks.find_bin(
@@ -536,7 +539,8 @@ def plot_diverging(grid: gp.GeoDataFrame, title: str,
         grid: A geopandas geodataframe with indexes x and y 
             (projected coordinates) and aggregate metric column
         metric: target column for aggregate. Default: postcount.
-        store_html: Provide a name to store figure as interactive HTML.
+        store_html: Provide a name to store figure as interactive HTML. If 
+            WEB_DRIVER is set, will also export to svg.
         title: Title of the map
         cmaps_diverging: Tuple for colormaps to use.
         hover_items: additional items to show on hover
@@ -586,13 +590,24 @@ def plot_diverging(grid: gp.GeoDataFrame, title: str,
         "hooks":[set_active_tool],
         "title":title
     }
+    # create layers for highlighting outliers
+    selmax_points = grid.nlargest(5, "chi_value").centroid
+    selmax_layer = tools.series_to_point(selmax_points) 
+    selmax_labels = tools.series_to_label(selmax_points)
+    selmin_points = grid.nsmallest(5, "chi_value").centroid
+    selmin_layer = tools.series_to_point(selmin_points)
+    selmin_labels = tools.series_to_label(selmin_points)
+    annotation_layers = get_annotation_layer(
+        sel_layer1=selmax_layer, sel_labels1=selmax_labels,
+        sel_layer2=selmin_layer, sel_labels2=selmin_labels)
     # plot responsive (html) or non-responsive (interactive)
     if plot:
         # get classified xarray gv image layer
         image_layer = compile_diverging_image_layer(
             **layer_opts, **base_kwargs)
         gv_layers = combine_gv_layers(
-            image_layer, fill_color=nodata_color, alpha=0.5)
+            image_layer, fill_color=nodata_color, alpha=0.5,
+            additional_layers=annotation_layers)
     if store_html:
         layer_opts["responsive"] = True
         image_layer = compile_diverging_image_layer(
@@ -600,9 +615,17 @@ def plot_diverging(grid: gp.GeoDataFrame, title: str,
         responsive_gv_layers = combine_gv_layers(
             image_layer, fill_color=nodata_color, alpha=0.5)
         gv_opts["responsive"] = True
+        export_layers = responsive_gv_layers.opts(**gv_opts)
         hv.save(
-            responsive_gv_layers.opts(**gv_opts),
+            export_layers,
             output / f"html{km_size_str}" / f'{store_html}.html', backend='bokeh')
+        if WEB_DRIVER:
+            # store also as svg
+            p =  hv.render(export_layers, backend='bokeh')
+            p.output_backend = "svg"
+            export_svgs(
+                p, filename=output / f"svg{km_size_str}" / f'{store_html}.svg',
+                webdriver=WEB_DRIVER)
     if not plot:
         return
     gv_opts["responsive"] = False
@@ -614,13 +637,11 @@ def plot_diverging(grid: gp.GeoDataFrame, title: str,
 # Set global config options:
 # - map bin colors to `chi_value`
 # - show `hover_items` on hover
-# - use "`Purples`" for underrepresentation,  
-#   to not confuse with later maps ranges
 
 # + tags=["active-ipynb"]
 # kwargs = {
 #     "hover_items":hover_items,
-#     "cmaps_diverging":("OrRd", "Purples")
+#     "cmaps_diverging":("OrRd", "Blues")
 # }
 # -
 
@@ -726,7 +747,8 @@ def get_chimap_fromcsv(
 
 # + tags=["active-ipynb"]
 # csv_kwargs = {
-#     "csv_expected":"instagram_sunsetsunrise_est.csv",
+#     # "csv_expected":"instagram_sunsetsunrise_est.csv",
+#     "csv_expected":"instagram_random_est.csv",
 #     "csv_observed":"instagram_sunrise_est.csv",
 #     "chi_column":CHI_COLUMN
 # }

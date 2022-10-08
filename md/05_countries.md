@@ -5,7 +5,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.13.7
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: worker_env
     language: python
@@ -19,12 +19,13 @@ _<a href= "mailto:alexander.dunkel@tu-dresden.de">Alexander Dunkel</a>, TU Dresd
 
 ----------------
 
-```python tags=["hide_code", "active-ipynb"]
+```python tags=["hide_code", "active-ipynb"] jupyter={"source_hidden": true}
 from IPython.display import Markdown as md
 from datetime import date
 
 today = date.today()
-md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 ```
 
 # Introduction
@@ -48,10 +49,9 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 # import all previous chained notebooks
 from _04_combine import *
-```
-
-```python tags=["active-ipynb"]
+from modules import preparations
 preparations.init_imports()
+WEB_DRIVER = preparations.load_chromedriver()
 ```
 
 Load additional dependencies
@@ -1338,9 +1338,17 @@ def plot_diverging_poly(poly_gdf: gp.GeoDataFrame, title: str,
         responsive_gv_layers = combine_gv_layers(
             poly_layer, fill_color=nodata_color, alpha=0.5)
         gv_opts["responsive"] = True
+        export_layers = responsive_gv_layers.opts(**gv_opts)
         hv.save(
-            responsive_gv_layers.opts(**gv_opts),
+            export_layers,
             output / f"html" / f'{store_html}.html', backend='bokeh')
+        if WEB_DRIVER:
+            # store also as svg
+            p =  hv.render(export_layers, backend='bokeh')
+            p.output_backend = "svg"
+            export_svgs(
+                p, filename=output / f"svg{km_size_str}" / f'{store_html}.svg',
+                webdriver=WEB_DRIVER)
     if not plot:
         return
     gv_opts["responsive"] = False
@@ -1535,7 +1543,7 @@ world_instagram_sunrise[world_instagram_sunrise['chi_value']<0].plot(
 ax.set_title(title)
 ```
 
-### Pooled Classification
+world_flickr_sunset### Pooled Classification
 
 Create the combined figure for the paper, based on pooled classification.
 
@@ -1544,10 +1552,20 @@ First, combine values into single dataframe.
 ```python tags=["active-ipynb"]
 world = world_flickr_sunset
 world.rename(columns={'chi_value':'flickrsunset'}, inplace=True)
+world.rename(columns={'significant':'significant_flickrsunset'}, inplace=True)
+world.rename(columns={'usercount_est':'usercount_est_flickrsunset'}, inplace=True)
+world.rename(columns={'usercount_est_expected':'usercount_est_expected_flickr'}, inplace=True)
 world['flickrsunset'] = world['flickrsunset'].astype('float')
 world['flickrsunrise'] = world_flickr_sunrise['chi_value'].astype('float')
+world['usercount_est_flickrsunrise'] = world_flickr_sunrise['usercount_est'].astype('float')
+world['significant_flickrsunrise'] = world_flickr_sunrise['significant']
 world['instagramsunset'] = world_instagram_sunset['chi_value'].astype('float')
 world['instagramsunrise'] = world_instagram_sunrise['chi_value'].astype('float')
+world['significant_instagramsunrise'] = world_instagram_sunrise['significant']
+world['usercount_est_instagramsunrise'] = world_instagram_sunrise['usercount_est'].astype('float')
+world['usercount_est_instagramsunset'] = world_instagram_sunset['usercount_est'].astype('float')
+world['usercount_est_expected_instagram'] = world_instagram_sunset['usercount_est_expected'].astype('float')
+world['significant_instagramsunset'] = world_instagram_sunset['significant']
 world.fillna(0, inplace=True)
 ```
 
@@ -1622,22 +1640,91 @@ tools.display_hex_colors(cmap.colors, as_id=True)
 Use `False` for legend below to store figure.
 
 ```python tags=["active-ipynb"]
-base_kwargs = {
-    "edgecolor":'grey',
-    }
+import matplotlib as mpl
+# adjust hatch width
+mpl.rcParams['hatch.linewidth'] = 2
+
 all_kwargs = {
-    # "cmap":'RdBu_r',
     "cmap":cmap,
-    # "cmap":'OrRd',
+    "edgecolor":'grey',
     "linewidth":0.2,
     "legend":True,   
     }
 hatch_kwargs = {
     "hatch":"///",
-    "alpha":0.5,
+    "alpha":1.0,
+    "edgecolor":"white",
     "facecolor":"none",
-    "linewidth":0
+    "linewidth":0,
     }
+```
+
+Total number of countries:
+
+```python tags=["active-ipynb"]
+len(world)
+```
+
+Count the number of total and non-significant countries for Flickr sunrise:
+
+```python tags=["active-ipynb"]
+len(world[world["significant_flickrsunrise"]==False])
+```
+
+.. and Flickr sunset:
+
+```python tags=["active-ipynb"]
+len(world[world["significant_flickrsunset"]==False])
+```
+
+Count the number of total and non-significant countries for Instagram sunset:
+
+```python tags=["active-ipynb"]
+len(world[world["significant_instagramsunset"]==False])
+```
+
+Count the number of total and non-significant countries for Instagram sunrise:
+
+```python tags=["active-ipynb"]
+len(world[world["significant_instagramsunrise"]==False])
+```
+
+Print the top 10 non-significant countries sorted by `usercount_est`(decending) for **Flickr/Sunset**:
+
+```python tags=["active-ipynb"]
+world[world["significant_flickrsunset"]==False].drop(
+    world.columns.difference(
+        ["usercount_est_expected_flickr", "usercount_est_flickrsunset", "significant_flickrsunset"]),
+    axis=1,
+    inplace=False).sort_values(
+        ["usercount_est_flickrsunset"], ascending=False).head(10)
+```
+
+Print the top 10 non-significant countries sorted by `usercount_est`(decending) for **Instagram/Sunset**:
+
+```python tags=["active-ipynb"]
+world[world["significant_instagramsunset"]==False].drop(
+    world.columns.difference(
+        ["usercount_est_expected_instagram", "usercount_est_instagramsunset", "significant_instagramsunset"]),
+    axis=1,
+    inplace=False).sort_values(
+        ["usercount_est_instagramsunset"], ascending=False).head(10)
+```
+
+These are all pretty small countries or islands. Lets compare the area/size of non-significant cpuntries
+
+```python tags=["active-ipynb"]
+area_instagramsunset_nonsignificant = \
+    world.loc[(world["significant_instagramsunset"]==False), 'geometry'].area.sum()
+area_instagramsunset_significant = \
+    world.loc[(world["significant_instagramsunset"]==True), 'geometry'].area.sum()
+percentage_sunset = area_instagramsunset_nonsignificant/(area_instagramsunset_significant/100)
+```
+
+```python tags=["active-ipynb"]
+print(f'{area_instagramsunset_significant/1000000:,.0f} km² significant')
+print(f'{area_instagramsunset_nonsignificant/1000000:,.0f} km² non-significant')
+print(f'{percentage_sunset:.0f}%')
 ```
 
 ```python tags=["active-ipynb"]
@@ -1647,7 +1734,14 @@ fig, axs = plt.subplots(2, 2, figsize=(22, 22))
 # in one dimension
 axs = axs.flatten()
 # Loop over each map
+topic = "flickr"
 for i, col in enumerate(submaps):
+    if i >= 2:
+        topic = "instagram"
+    if (i % 2) == 0:
+        topicsel = f'{topic}sunset'
+    else:
+        topicsel = f'{topic}sunrise'
     world.plot(
         col,                  # Year to plot
         scheme='UserDefined', # Use our own bins
@@ -1655,10 +1749,11 @@ for i, col in enumerate(submaps):
             'bins': pooled.global_classifier.bins
         }, 
         ax=axs[i],             # Plot on the corresponding axis
-        **base_kwargs, **all_kwargs
+        **all_kwargs
     )
-    # world[world[col]<0].plot(
-    #     ax=axs[i], **base_kwargs, **hatch_kwargs)
+    # hatch non-significant
+    world[world[f"significant_{topicsel}"]==False].plot(
+        ax=axs[i], **hatch_kwargs)
     # Remove axis
     axs[i].set_axis_off()
     # Name the subplot with the name of the column
@@ -1671,7 +1766,11 @@ plt.tight_layout()
 plt.show()
 if not all_kwargs.get("legend"):
     fig.savefig(
-        OUTPUT / f"figures" / "country_chi.png", dpi=300, format='PNG',
+        OUTPUT / "figures" / "country_chi.png", dpi=300, format='PNG',
+        bbox_inches='tight', pad_inches=1, facecolor="white")
+    # also save as svg
+    fig.savefig(
+        OUTPUT / "svg" / "country_chi.svg", format='svg',
         bbox_inches='tight', pad_inches=1, facecolor="white")
 ```
 

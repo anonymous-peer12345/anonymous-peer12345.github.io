@@ -6,11 +6,19 @@ import pandas as pd
 import geoviews as gv
 import geopandas as gp
 import numpy as np
+import time
+import base64
 from cartopy import crs
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 from pathlib import Path
 from collections import namedtuple
 from IPython.display import display
+from IPython.display import clear_output
+
+try:
+    from cairosvg import svg2pdf
+except ImportError:
+    svg2pdf = None
 
 class DbConn(object):
 
@@ -173,14 +181,78 @@ def display_debug_dict(debug_dict, transposed: bool = None):
 def is_nan(x):
     return (x is np.nan or x != x)
 
-def series_to_point(points: gp.GeoSeries, crs=crs.Mollweide()) -> gv.Points:
+def series_to_point(
+        points: gp.GeoSeries, crs=crs.Mollweide(), 
+        mod_x: Optional[int] = 0, mod_y: Optional[int] = 0) -> gv.Points:
     """Convert a Geopandas Geoseries of points to a Geoviews Points layer"""
     return gv.Points(
-        [(point.x, point.y) for point in points.geometry], crs=crs)
+        [(point.x+mod_x, point.y+mod_y) for point in points.geometry], crs=crs)
 
 def series_to_label(points: gp.GeoSeries, crs=crs.Mollweide()) -> List[gv.Text]:
     """Convert a Geopandas Geoseries of points to a list of Geoviews Text label layers"""
     return [gv.Text(point.x+300000, point.y+300000, str(i+1), crs=crs) for i, point in enumerate(points.geometry)]
+
+def _svg_to_pdf(filename: Path, out_dir: Optional[Path] = None):
+    """Convert a svg on disk to a pdf using cairosvg"""
+    if out_dir is None:
+        out_dir = filename.parents[0]
+    if svg2pdf is None:
+        raise ImportError("Please install cairosvg for svg2pdf")
+    svg2pdf(file_obj=open(
+        filename, "rb"), write_to=str(out_dir / f'{filename.stem}.pdf'))
+
+def svg_to_pdf_chromium(filename: Path,  out_dir: Optional[Path] = None):
+    """Convert a svg on disk to a pdf using Selenium and Chromedriver"""
+    import json
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+
+    if out_dir is None:
+        out_dir = filename.parents[0]
+        
+    service = Service(ChromeDriverManager().install())
+    chrome_options = webdriver.ChromeOptions()
+    chrome_options.add_argument('--kiosk-printing')
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--window-size=2000x2000")
+    chrome_options.add_argument('--disable-dev-shm-usage')
+
+    webdriver_chrome = webdriver.Chrome(service=service, options=chrome_options)
+    webdriver_chrome.get(f'file://{filename}')
+
+    pdf = webdriver_chrome.execute_cdp_cmd(
+        "Page.printToPDF", {
+            "paperWidth": 8.3,
+            "paperHeight": 11.7,
+            "printBackground": True, 
+            'landscape': True,
+            'displayHeaderFooter': False,
+            'scale': 0.75
+            })
     
+    webdriver_chrome.close()
+    
+    with open(out_dir / f'{filename.stem}.pdf', "wb") as f:
+        f.write(base64.b64decode(pdf['data']))
+    
+def convert_svg_pdf(in_dir: Path,  out_dir: Optional[Path] = None):
+    """Convert all svg in in_dir to a pdf using Selenium and Chromedriver"""
+    
+    if out_dir is None:
+        out_dir = in_dir
+        
+    files_folders = Path(in_dir).glob('*.svg')
+    files_svg = [x for x in files_folders if x.is_file()]
+    for cnt, file in enumerate(files_svg):
+        svg_to_pdf_chromium(
+            filename=file, out_dir=out_dir)
+        clear_output(wait=True)
+        print(f"Processed {cnt+1} of {len(files_svg)} files..")
+
+
+
 
 

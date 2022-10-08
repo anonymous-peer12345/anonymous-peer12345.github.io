@@ -5,7 +5,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.13.7
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: worker_env
     language: python
@@ -24,7 +24,8 @@ from IPython.display import Markdown as md
 from datetime import date
 
 today = date.today()
-md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 ```
 
 Visualization of TFIDF and Cosine Similarity Values
@@ -45,10 +46,9 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 # import all previous chained notebooks
 from _05_countries import *
-```
-
-```python
 from modules import preparations
+preparations.init_imports()
+WEB_DRIVER = preparations.load_chromedriver()
 ```
 
 Activate autoreload of changed python files:
@@ -167,7 +167,7 @@ def load_combine(su_a3_ref: str, value_df: pd.DataFrame):
     world.loc[value_df.index, "cosine"] = value_df[su_a3_ref]
     # Set selected country to NaN, which is always 1 
     # and can therefore be excluded from the classification process
-    world.loc["UGA", "cosine"] = np.nan
+    world.loc[su_a3_ref, "cosine"] = np.nan
     # add tfidf values
     world.loc[df_tfidf.index, "tfidf"] = df_tfidf['tfidf']
     world.tfidf = world.tfidf.fillna('')
@@ -521,9 +521,17 @@ def plot_interactive_cosine(
         responsive_gv_layers = gv.Overlay(
             [poly_layer, sel_poly_layer])
         gv_opts["responsive"] = True
+        export_layers = responsive_gv_layers.opts(**gv_opts)
         hv.save(
-            responsive_gv_layers.opts(**gv_opts),
+            export_layers,
             output / f"html" / f'{store_html}.html', backend='bokeh')
+        if WEB_DRIVER:
+            # store also as svg
+            p =  hv.render(export_layers, backend='bokeh')
+            p.output_backend = "svg"
+            export_svgs(
+                p, filename=output / f"svg{km_size_str}" / f'{store_html}.svg',
+                webdriver=WEB_DRIVER)
     if not plot:
         return
     gv_opts["responsive"] = False

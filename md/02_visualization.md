@@ -6,7 +6,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.13.7
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: worker_env
     language: python
@@ -25,12 +25,13 @@ from IPython.display import Markdown as md
 from datetime import date
 
 today = date.today()
-md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 ```
 
 # Introduction
 
-This is the second notebook in a series of eight notebooks:
+This is the second notebook in a series of nine notebooks:
 
 1. the grid aggregation notebook (01_gridagg.ipynb) is used to aggregate data from HLL sets at GeoHash 5 to a 100x100km grid  
 2. the visualization notebook (02_visualization.ipynb) is used to create interactive maps, with additional information shown on hover
@@ -61,6 +62,7 @@ from pathlib import Path
 from rtree import index
 from IPython.display import Markdown
 from bokeh.models import HoverTool, FixedTicker
+from bokeh.io import export_svgs
 ```
 
 ```python
@@ -74,10 +76,16 @@ from modules import preparations
 preparations.init_imports()
 ```
 
+Prepare svg export (if chromedriver found):
+
+```python tags=["active-ipynb"]
+WEB_DRIVER = preparations.load_chromedriver()
+```
+
 ## Import first notebook
 
 
-We're going to use many methods and the parameters defined in the previous notebook. These are imported form the jupytext converted python script file:
+We're going to use many methods and the parameters defined in the previous notebook. These are imported from the jupytext converted python script file:
 
 ```python
 from _01_grid_agg import *
@@ -643,7 +651,8 @@ def plot_interactive(grid: gp.GeoDataFrame, title: str,
         "title":title
     }
     sel_points = grid.nlargest(5, metric).centroid
-    sel_layer = tools.series_to_point(sel_points)
+    # add y offset to correct for 1/2 bin length
+    sel_layer = tools.series_to_point(sel_points, mod_y = GRID_SIZE_METERS/2)
     sel_labels = tools.series_to_label(sel_points)
     annotation_layers = get_annotation_layer(sel_layer1=sel_layer, sel_labels1=sel_labels)
     if plot:
@@ -658,11 +667,20 @@ def plot_interactive(grid: gp.GeoDataFrame, title: str,
         image_layer = compile_image_layer(
             grid=grid, **layer_opts)
         responsive_gv_layers = combine_gv_layers(
-            image_layer, fill_color=nodata_color, alpha=0.5)
+            image_layer, fill_color=nodata_color, alpha=0.5,
+            additional_layers=annotation_layers)
         gv_opts["responsive"] = True
+        export_layers = responsive_gv_layers.opts(**gv_opts)
         hv.save(
-            responsive_gv_layers.opts(**gv_opts),
+            export_layers,
             output / f"html{km_size_str}" / f'{store_html}.html', backend='bokeh')
+        if WEB_DRIVER:
+            # store also as svg
+            p =  hv.render(export_layers, backend='bokeh')
+            p.output_backend = "svg"
+            export_svgs(p, 
+                filename=output / f"svg{km_size_str}" / f'{store_html}.svg',
+                webdriver=WEB_DRIVER)
     if not plot:
         return
     gv_opts["responsive"] = False

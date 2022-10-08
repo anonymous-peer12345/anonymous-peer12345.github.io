@@ -6,7 +6,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.13.7
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: worker_env
     language: python
@@ -20,19 +20,20 @@ _<a href= "mailto:alexander.dunkel@tu-dresden.de">Alexander Dunkel</a>, TU Dresd
 
 ----------------
 
-```python tags=["hide_code", "active-ipynb"]
+```python tags=["hide_code", "active-ipynb"] jupyter={"source_hidden": true}
 from IPython.display import Markdown as md
 from datetime import date
 
 today = date.today()
-md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 ```
 
 # Introduction
 
 Based on data from Instagram and Flickr, we'll explore global reactions to sunsets and sunrises in these notebooks.
 
-This is the first notebook in a series of eight notebooks:
+This is the first notebook in a series of nine notebooks:
 
 1. the grid aggregation notebook (01_gridagg.ipynb) is used to aggregate data from HLL sets at GeoHash 5 to a 100x100km grid  
 2. the visualization notebook (02_visualization.ipynb) is used to create interactive maps, with additional information shown on hover
@@ -46,8 +47,8 @@ Use **Shift+Enter** to walk through the Notebook
 
 **Install dependencies**
 
-- Either use the [LBSN Jupyter Lab Docker Container](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab)
-- or follow the following steps to create an env in conda for running this notebook. Suggested using `miniconda` in WSL.
+- Either use the [Carto-Lab Docker Container](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab)
+- or use the following steps to create an env in conda for running this notebook. Suggested using `miniconda` in WSL.
 
 <details><summary><strong>Manual installation of dependencies</strong></summary>
 <div style="width:800px">
@@ -62,7 +63,7 @@ conda config --show channel_priority # verify
 conda install -c conda-forge 'ipywidgets=7.5.*' jupyterlab jupyterlab-git \
     jupytext jupyter_contrib_nbextensions jupyter_nbextensions_configurator
 # visualization dependencies
-conda install -c conda-forge geopandas jupyterlab "geoviews-core=1.8.1" \
+conda install -c conda-forge geopandas jupyterlab "geoviews-core=1.9.5" \
     descartes mapclassify jupyter_contrib_nbextensions xarray \
     colorcet memory_profiler seaborn
 # privacy aware dependencies
@@ -75,7 +76,7 @@ to upgrade later, use:
 conda upgrade -n sunset_env --all -c conda-forge
 </code></pre>
 <br>
-Pinning geoviews to 1.8.1 should result in packages installed that are compatible with the code herein. For full compatibility, 
+Pinning geoviews to 1.9.5 should result in packages installed that are compatible with the code herein. For full compatibility, 
 install exact versions as shown below ("Plot used package versions for future use").
 <br>
 To start the jupyter lab server:
@@ -145,26 +146,26 @@ preparations.init_imports()
 
 ## Parameters
 
-This is a collection of parameters that affect processing of graphics.
+Define initial parameters that affect processing of data and graphics in all notebooks.
 
 ```python
-# the size of grid cells in meters 
-# (spatial accuracy of worldwide measurement)
 GRID_SIZE_METERS = 100000
-# process x number of hll records per chunk.
-# Increasing this number will consume more memory,
-# but reduce processing time because less SQL queries
-# are needed.
-CHUNK_SIZE = 5000000                              
-# target projection: Mollweide (epsg code)
+"""The size of grid cells in meters 
+(spatial accuracy of worldwide measurement)"""
+CHUNK_SIZE = 5000000
+"""Process x number of hll records per chunk.
+Increasing this number will consume more memory,
+but reduce processing time because less SQL queries
+are needed."""
 EPSG_CODE = 54009
-# note: Mollweide defined by _esri_
-# in epsg.io's database
 CRS_PROJ = f"esri:{EPSG_CODE}"
-# Input projection (Web Mercator)
+"""Target projection: Mollweide (epsg code).
+note: Mollweide defined by _esri_
+in epsg.io's database"""
 CRS_WGS = "epsg:4326"
-# define path to output directory (figures etc.)
+"""Input projection (Web Mercator)"""
 OUTPUT = Path.cwd().parents[0] / "out"
+"""Define path to output directory (figures etc.)""";
 ```
 
 We want to modify intermediate file names if not using a 100 km grid:
@@ -181,7 +182,7 @@ else:
 
 ```python
 def create_paths(
-    output: str = OUTPUT, subfolders: List[str] = ["html", "pickles", "csv", "figures"]):
+    output: str = OUTPUT, subfolders: List[str] = ["html", "pickles", "csv", "figures", "svg", "pdf"]):
     """Create subfolder for results to be stored"""
     output.mkdir(exist_ok=True)
     for subfolder in subfolders:
@@ -476,7 +477,8 @@ The aggregation speed is important here and we should not use polygon intersecti
 ```python tags=["active-ipynb"]
 testpoint = Point(8.546377, 47.392323)
 testpoint2 = Point(13.726359, 51.028512)
-gdf_testpoints = gp.GeoSeries([testpoint, testpoint2], crs=CRS_WGS)
+testpoint3 = Point(13.71389, 46.52278) # Dreiländereck
+gdf_testpoints = gp.GeoSeries([testpoint, testpoint2, testpoint3], crs=CRS_WGS)
 # project geometries to Mollweide
 gdf_testpoints_proj = gdf_testpoints.to_crs(CRS_PROJ)
 display(gdf_testpoints_proj[0].x)
@@ -486,7 +488,7 @@ Preview map for testpoint
 
 ```python tags=["active-ipynb"]
 base = world.plot(figsize=(22,28), color='white', edgecolor='black', linewidth=0.1)
-plot = gdf_testpoints_proj.plot(ax=base)
+plot = gdf_testpoints_proj.plot(ax=base, markersize=10)
 ```
 
 ### Use np.digitize() to assign coordinates to the grid
@@ -504,8 +506,8 @@ xbins = np.array(cols)
 Create 2 lists with a single entry (testpoint coordinate)
 
 ```python tags=["active-ipynb"]
-test_point_list_x = np.array([gdf_testpoints_proj[0].x, gdf_testpoints_proj[1].x])
-test_point_list_y = np.array([gdf_testpoints_proj[0].y, gdf_testpoints_proj[1].y])
+test_point_list_x = np.array([p.x for p in gdf_testpoints_proj])
+test_point_list_y = np.array([p.y for p in gdf_testpoints_proj])
 ```
 
 Find the nearest bin for x coordinate (returns the bin-index):
@@ -518,7 +520,7 @@ display(x_bin)
 Check value of bin (the y coordinate) based on returned index:
 
 ```python tags=["active-ipynb"]
-testpoint_xbin_idx = xbins[[x_bin[0], x_bin[1]]]
+testpoint_xbin_idx = xbins[[x_bin[x] for x in range(0, len(x_bin))]]
 display(testpoint_xbin_idx)
 ```
 
@@ -530,7 +532,7 @@ display(y_bin)
 ```
 
 ```python tags=["active-ipynb"]
-testpoint_ybin_idx = ybins[[y_bin[0], y_bin[1]]]
+testpoint_ybin_idx = ybins[[y_bin[x] for x in range(0, len(y_bin))]]
 display(testpoint_ybin_idx)
 ```
 
@@ -550,7 +552,7 @@ Convert shapely bin poly to Geoseries and plot
 
 ```python tags=["active-ipynb"]
 testpoint_grids = gp.GeoSeries(
-    [grid.loc[testpoint_xbin_idx[0], testpoint_ybin_idx[0]].geometry, grid.loc[testpoint_xbin_idx[1], testpoint_ybin_idx[1]].geometry])
+    [grid.loc[testpoint_xbin_idx[x], testpoint_ybin_idx[x]].geometry for x in range(0,len(gdf_testpoints))])
 testpoint_grids.plot()
 ```
 
@@ -642,7 +644,7 @@ reset_metrics(grid)
 
 ```python tags=["active-ipynb"]
 %%time
-df = pd.read_csv(SUNSET_FLICKR, usecols=usecols, dtype=dtypes, encoding='utf-8')
+df = pd.read_csv(SUNRISE_FLICKR, usecols=usecols, dtype=dtypes, encoding='utf-8')
 print(len(df))
 ```
 
@@ -742,7 +744,7 @@ df.head()
 
 The next step is to union hll sets and (optionally) return the cardinality (the number of distinct elements). This can only be done by connecting to a postgres database with HLL extension installed. We're using our hlldb here, but it is equally possible to connect to an empty Postgres DB such as pg-hll-empty docker container.
 
-```python tags=["highlight_red", "active-ipynb"]
+```python tags=["active-ipynb"]
 def union_hll(
     hll_series: pd.Series, cardinality: bool = True,
     db_calc: tools.DbConn = DB_CALC) -> pd.Series:
@@ -1238,7 +1240,7 @@ Run:
 ```python tags=["active-ipynb"]
 %%time
 chunked_df = read_project_chunked(
-    filename=SUNSET_FLICKR,
+    filename=SUNRISE_FLICKR,
     usecols=usecols,
     bbox=bbox_italy_buf)
 display(chunked_df[0].head())
@@ -2031,7 +2033,7 @@ DB_CONN.close()
 ```
 
 ```python tags=["active-ipynb"]
-!jupyter nbconvert --to Html_toc \
+!jupyter nbconvert --to html_toc \
     --output-dir=../out/html{km_size_str} ./01_grid_agg.ipynb \
     --template=../nbconvert.tpl \
     --ExtractOutputPreprocessor.enabled=False >&- 2>&-  # create single output file

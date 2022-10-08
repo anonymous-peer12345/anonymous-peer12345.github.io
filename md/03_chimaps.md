@@ -6,7 +6,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.13.7
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: worker_env
     language: python
@@ -20,17 +20,18 @@ _<a href= "mailto:alexander.dunkel@tu-dresden.de">Alexander Dunkel</a>, TU Dresd
 
 ----------------
 
-```python tags=["hide_code", "active-ipynb"]
+```python tags=["hide_code", "active-ipynb"] jupyter={"source_hidden": true}
 from IPython.display import Markdown as md
 from datetime import date
 
 today = date.today()
-md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 ```
 
 # Introduction
 
-This is the third notebook in a series of eight notebooks:
+This is the third notebook in a series of nine notebooks:
 
 1. the grid aggregation notebook (01_gridagg.ipynb) is used to aggregate data from HLL sets at GeoHash 5 to a 100x100km grid  
 2. the visualization notebook (02_visualization.ipynb) is used to create interactive maps, with additional information shown on hover
@@ -77,9 +78,10 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 ```
 
-```python
+```python tags=["active-ipynb"]
 from modules import preparations
 preparations.init_imports()
+WEB_DRIVER = preparations.load_chromedriver()
 ```
 
 **Import visualization notebook**
@@ -552,7 +554,8 @@ def plot_diverging(grid: gp.GeoDataFrame, title: str,
         grid: A geopandas geodataframe with indexes x and y 
             (projected coordinates) and aggregate metric column
         metric: target column for aggregate. Default: postcount.
-        store_html: Provide a name to store figure as interactive HTML.
+        store_html: Provide a name to store figure as interactive HTML. If 
+            WEB_DRIVER is set, will also export to svg.
         title: Title of the map
         cmaps_diverging: Tuple for colormaps to use.
         hover_items: additional items to show on hover
@@ -627,9 +630,17 @@ def plot_diverging(grid: gp.GeoDataFrame, title: str,
         responsive_gv_layers = combine_gv_layers(
             image_layer, fill_color=nodata_color, alpha=0.5)
         gv_opts["responsive"] = True
+        export_layers = responsive_gv_layers.opts(**gv_opts)
         hv.save(
-            responsive_gv_layers.opts(**gv_opts),
+            export_layers,
             output / f"html{km_size_str}" / f'{store_html}.html', backend='bokeh')
+        if WEB_DRIVER:
+            # store also as svg
+            p =  hv.render(export_layers, backend='bokeh')
+            p.output_backend = "svg"
+            export_svgs(
+                p, filename=output / f"svg{km_size_str}" / f'{store_html}.svg',
+                webdriver=WEB_DRIVER)
     if not plot:
         return
     gv_opts["responsive"] = False

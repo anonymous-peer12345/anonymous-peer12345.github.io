@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # ---
 # jupyter:
 #   jupytext:
@@ -7,7 +6,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.11.2
+#       jupytext_version: 1.14.0
 #   kernelspec:
 #     display_name: worker_env
 #     language: python
@@ -25,12 +24,13 @@
 # from datetime import date
 #
 # today = date.today()
-# md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+# with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+# md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 # -
 
 # # Introduction
 #
-# This is the second notebook in a series of eight notebooks:
+# This is the second notebook in a series of nine notebooks:
 #
 # 1. the grid aggregation notebook (01_gridagg.ipynb) is used to aggregate data from HLL sets at GeoHash 5 to a 100x100km grid  
 # 2. the visualization notebook (02_visualization.ipynb) is used to create interactive maps, with additional information shown on hover
@@ -56,6 +56,7 @@ from pathlib import Path
 from rtree import index
 from IPython.display import Markdown
 from bokeh.models import HoverTool, FixedTicker
+from bokeh.io import export_svgs
 
 module_path = str(Path.cwd().parents[0] / "py")
 if module_path not in sys.path:
@@ -66,9 +67,15 @@ from modules import preparations
 # preparations.init_imports()
 # -
 
+# Prepare svg export (if chromedriver found):
+
+# + tags=["active-ipynb"]
+# WEB_DRIVER = preparations.load_chromedriver()
+# -
+
 # ## Import first notebook
 
-# We're going to use many methods and the parameters defined in the previous notebook. These are imported form the jupytext converted python script file:
+# We're going to use many methods and the parameters defined in the previous notebook. These are imported from the jupytext converted python script file:
 
 from _01_grid_agg import *
 
@@ -157,23 +164,13 @@ def get_scheme_breaks(series_nan: pd.Series, scheme: str):
 
 def classify_data(
         values_series: pd.Series,
-        scheme: str,
-        cmap_name: str):
+        scheme: str):
     """Classify data (value series) and return classes,
        bounds, and colormap
        
     Args:
-        grid: A geopandas geodataframe with metric column to classify
-        metric: The metric column to classify values
+        values_series: A pandas.Series with metric column to classify
         scheme: The classification scheme to use.
-        mask_nonsignificant: If True, removes non-significant values
-            before classifying
-        mask_negative: Only consider positive values.
-        mask_positive: Only consider negative values.
-        cmap_name: The colormap to use.
-        return_cmap: if False, returns list instead of mpl.ListedColormap
-        store_classes: Update classes in original grid (_cat column). If
-            not set, no modifications will be made to grid.
         
     Adapted from:
         https://stackoverflow.com/a/58160985/4556479
@@ -393,7 +390,7 @@ def get_classify_image(grid: gp.GeoDataFrame,
         grid=grid, metric=metric, **kwargs)
     # classify values
     bounds, scheme_breaks = classify_data(
-        values_series=series_nan, scheme=scheme, cmap_name=cmap_name)
+        values_series=series_nan, scheme=scheme)
     # assign categories column
     grid.loc[series_nan.index, f'{metric}_cat'] = scheme_breaks.find_bin(
         series_nan)
@@ -529,9 +526,11 @@ def compile_image_layer(grid: gp.GeoDataFrame,
     return image_layer
 
 
+# +
 def combine_gv_layers(
         image_layer: gv.Image, edgecolor: str = 'black',
-        fill_color: str = '#dbdbdb', alpha: float = 0.15) -> gv.Overlay:
+        fill_color: str = '#dbdbdb', alpha: float = 0.15,
+        additional_layers = None) -> gv.Overlay:
     """Combine layers into single overlay and set global plot options"""
     # fill_color = '#479AD4'
     # fill_color = '#E9EDEC'
@@ -549,9 +548,38 @@ def combine_gv_layers(
             line_color=edgecolor)) 
     gv_layers.append(
         gf.borders.opts(
-            line_color=edgecolor)) 
+            line_color=edgecolor))
+    if additional_layers:
+        gv_layers.extend(additional_layers)
     return gv.Overlay(gv_layers)
 
+def get_annotation_layer(
+        sel_layer1: gv.Points, sel_layer2: gv.Points = None,
+        sel_labels1: List[gv.Text] = None, sel_labels2: List[gv.Text] = None):
+    """Prepare annotation layer
+    
+    add layer(s) for highlighting special grid cells (largest, smallest)
+    see marker symbols
+    https://docs.bokeh.org/en/2.4.1/docs/reference/models/markers.html#scatter
+    """
+    gv_layers = []
+    gv_layers.append(
+        sel_layer1.opts(
+            line_color='black', fill_color=None, marker='square', 
+            size=20, alpha=0.8))
+    if sel_labels1:
+        gv_layers.extend(sel_labels1)
+    if sel_layer2:
+        gv_layers.append(
+            sel_layer2.opts(
+                line_color='black', fill_color=None, marker='triangle', 
+                size=20, alpha=0.8))
+    if sel_labels2:
+        gv_layers.extend(sel_labels2)
+    return gv_layers
+
+
+# -
 
 # High level plotting function
 
@@ -607,22 +635,37 @@ def plot_interactive(grid: gp.GeoDataFrame, title: str,
         "hooks":[set_active_tool],
         "title":title
     }
+    sel_points = grid.nlargest(5, metric).centroid
+    # add y offset to correct for 1/2 bin length
+    sel_layer = tools.series_to_point(sel_points, mod_y = GRID_SIZE_METERS/2)
+    sel_labels = tools.series_to_label(sel_points)
+    annotation_layers = get_annotation_layer(sel_layer1=sel_layer, sel_labels1=sel_labels)
     if plot:
         # get classified xarray gv image layer
         image_layer = compile_image_layer(
             grid=grid, **layer_opts)
         gv_layers = combine_gv_layers(
-            image_layer, fill_color=nodata_color, alpha=0.5)
+            image_layer, fill_color=nodata_color, alpha=0.5, 
+            additional_layers=annotation_layers)
     if store_html:
         layer_opts["responsive"] = True
         image_layer = compile_image_layer(
             grid=grid, **layer_opts)
         responsive_gv_layers = combine_gv_layers(
-            image_layer, fill_color=nodata_color, alpha=0.5)
+            image_layer, fill_color=nodata_color, alpha=0.5,
+            additional_layers=annotation_layers)
         gv_opts["responsive"] = True
+        export_layers = responsive_gv_layers.opts(**gv_opts)
         hv.save(
-            responsive_gv_layers.opts(**gv_opts),
+            export_layers,
             output / f"html{km_size_str}" / f'{store_html}.html', backend='bokeh')
+        if WEB_DRIVER:
+            # store also as svg
+            p =  hv.render(export_layers, backend='bokeh')
+            p.output_backend = "svg"
+            export_svgs(p, 
+                filename=output / f"svg{km_size_str}" / f'{store_html}.svg',
+                webdriver=WEB_DRIVER)
     if not plot:
         return
     gv_opts["responsive"] = False

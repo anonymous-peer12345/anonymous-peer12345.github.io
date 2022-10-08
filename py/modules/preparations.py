@@ -1,10 +1,12 @@
 """GridAgg Notebook Preparations"""
 
-from typing import List, Tuple, Dict
+
+import logging
 import holoviews as hv
 import pandas as pd
 import shapely.speedups as speedups
 import pkg_resources
+from typing import List, Tuple, Dict
 
 def init_imports():
     """Initialize speedups and bokeh"""
@@ -23,3 +25,25 @@ def package_report(root_packages: List[str]):
                 root_packages_list,
                 columns=["package", "version"]
             ).set_index("package").transpose())
+
+def load_chromedriver():
+    """Loads chromedriver (for bokeh svg export), of found"""
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+        
+        options = webdriver.ChromeOptions()
+        options.add_argument('--headless')
+        options.add_argument('--disable-gpu')
+        options.add_argument("--no-sandbox")
+        options.add_argument("--window-size=2000x2000")
+        options.add_argument('--disable-dev-shm-usage')        
+        
+        service = Service(ChromeDriverManager().install())
+        webdriver = webdriver.Chrome(service=service, options=options)
+        print('Chromedriver loaded. Svg output enabled.')
+    except:
+        logging.warning('Chromedriver not found. Disabling svg output.')
+        webdriver = None
+    return webdriver

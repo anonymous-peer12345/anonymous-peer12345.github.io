@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # ---
 # jupyter:
 #   jupytext:
@@ -7,7 +6,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.13.7
+#       jupytext_version: 1.14.0
 #   kernelspec:
 #     display_name: worker_env
 #     language: python
@@ -20,19 +19,20 @@
 #
 # ----------------
 
-# + tags=["hide_code", "active-ipynb"]
+# + tags=["hide_code", "active-ipynb"] jupyter={"source_hidden": true}
 # from IPython.display import Markdown as md
 # from datetime import date
 #
 # today = date.today()
-# md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+# with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+# md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 # -
 
 # # Introduction
 #
 # Based on data from Instagram and Flickr, we'll explore global reactions to sunsets and sunrises in these notebooks.
 #
-# This is the first notebook in a series of eight notebooks:
+# This is the first notebook in a series of nine notebooks:
 #
 # 1. the grid aggregation notebook (01_gridagg.ipynb) is used to aggregate data from HLL sets at GeoHash 5 to a 100x100km grid  
 # 2. the visualization notebook (02_visualization.ipynb) is used to create interactive maps, with additional information shown on hover
@@ -46,8 +46,8 @@
 #
 # **Install dependencies**
 #
-# - Either use the [LBSN Jupyter Lab Docker Container](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab)
-# - or follow the following steps to create an env in conda for running this notebook. Suggested using `miniconda` in WSL.
+# - Either use the [Carto-Lab Docker Container](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab)
+# - or use the following steps to create an env in conda for running this notebook. Suggested using `miniconda` in WSL.
 #
 # <details><summary><strong>Manual installation of dependencies</strong></summary>
 # <div style="width:800px">
@@ -62,7 +62,7 @@
 # conda install -c conda-forge 'ipywidgets=7.5.*' jupyterlab jupyterlab-git \
 #     jupytext jupyter_contrib_nbextensions jupyter_nbextensions_configurator
 # # visualization dependencies
-# conda install -c conda-forge geopandas jupyterlab "geoviews-core=1.8.1" \
+# conda install -c conda-forge geopandas jupyterlab "geoviews-core=1.9.5" \
 #     descartes mapclassify jupyter_contrib_nbextensions xarray \
 #     colorcet memory_profiler seaborn
 # # privacy aware dependencies
@@ -75,7 +75,7 @@
 # conda upgrade -n sunset_env --all -c conda-forge
 # </code></pre>
 # <br>
-# Pinning geoviews to 1.8.1 should result in packages installed that are compatible with the code herein. For full compatibility, 
+# Pinning geoviews to 1.9.5 should result in packages installed that are compatible with the code herein. For full compatibility, 
 # install exact versions as shown below ("Plot used package versions for future use").
 # <br>
 # To start the jupyter lab server:
@@ -139,25 +139,25 @@ from modules import tools, preparations
 
 # ## Parameters
 #
-# This is a collection of parameters that affect processing of graphics.
+# Define initial parameters that affect processing of data and graphics in all notebooks.
 
-# the size of grid cells in meters 
-# (spatial accuracy of worldwide measurement)
-GRID_SIZE_METERS = 50000
-# process x number of hll records per chunk.
-# Increasing this number will consume more memory,
-# but reduce processing time because less SQL queries
-# are needed.
-CHUNK_SIZE = 5000000                              
-# target projection: Mollweide (epsg code)
+GRID_SIZE_METERS = 100000
+"""The size of grid cells in meters 
+(spatial accuracy of worldwide measurement)"""
+CHUNK_SIZE = 5000000
+"""Process x number of hll records per chunk.
+Increasing this number will consume more memory,
+but reduce processing time because less SQL queries
+are needed."""
 EPSG_CODE = 54009
-# note: Mollweide defined by _esri_
-# in epsg.io's database
 CRS_PROJ = f"esri:{EPSG_CODE}"
-# Input projection (Web Mercator)
+"""Target projection: Mollweide (epsg code).
+note: Mollweide defined by _esri_
+in epsg.io's database"""
 CRS_WGS = "epsg:4326"
-# define path to output directory (figures etc.)
+"""Input projection (Web Mercator)"""
 OUTPUT = Path.cwd().parents[0] / "out"
+"""Define path to output directory (figures etc.)""";
 
 # We want to modify intermediate file names if not using a 100 km grid:
 
@@ -171,7 +171,7 @@ else:
 # **Create paths**
 
 def create_paths(
-    output: str = OUTPUT, subfolders: List[str] = ["html", "pickles", "csv", "figures"]):
+    output: str = OUTPUT, subfolders: List[str] = ["html", "pickles", "csv", "figures", "svg", "pdf"]):
     """Create subfolder for results to be stored"""
     output.mkdir(exist_ok=True)
     for subfolder in subfolders:
@@ -234,6 +234,7 @@ SUNSET_FLICKR = root / "2020-04-08_Flickr_Sunset_World_HLL.csv"
 ALL_FLICKR = root / "2020-09-22_Flickr_All_World_HLL.csv"
 SUNRISE_INSTAGRAM = root / "2020-09-16_Instagram_sunrise_World_HLL.csv"
 SUNSET_INSTAGRAM = root / "2020-09-16_Instagram_sunset_World_HLL.csv"
+RANDOM_INSTAGRAM = root / "2022-04-13_Instagram_Random_World_HLL.csv"
 
 # ## Dataset Preview
 
@@ -246,7 +247,8 @@ SUNSET_INSTAGRAM = root / "2020-09-16_Instagram_sunset_World_HLL.csv"
 #     "SUNSET_FLICKR":SUNSET_FLICKR,
 #     "ALL_FLICKR":ALL_FLICKR,
 #     "SUNRISE_INSTAGRAM":SUNRISE_INSTAGRAM,
-#     "SUNSET_INSTAGRAM":SUNSET_INSTAGRAM
+#     "SUNSET_INSTAGRAM":SUNSET_INSTAGRAM,
+#     "RANDOM_INSTAGRAM":RANDOM_INSTAGRAM,
 #     }
 # tools.display_file_stats(data_files)
 # -
@@ -449,7 +451,8 @@ def reset_metrics(
 # + tags=["active-ipynb"]
 # testpoint = Point(8.546377, 47.392323)
 # testpoint2 = Point(13.726359, 51.028512)
-# gdf_testpoints = gp.GeoSeries([testpoint, testpoint2], crs=CRS_WGS)
+# testpoint3 = Point(13.71389, 46.52278) # Dreiländereck
+# gdf_testpoints = gp.GeoSeries([testpoint, testpoint2, testpoint3], crs=CRS_WGS)
 # # project geometries to Mollweide
 # gdf_testpoints_proj = gdf_testpoints.to_crs(CRS_PROJ)
 # display(gdf_testpoints_proj[0].x)
@@ -459,7 +462,7 @@ def reset_metrics(
 
 # + tags=["active-ipynb"]
 # base = world.plot(figsize=(22,28), color='white', edgecolor='black', linewidth=0.1)
-# plot = gdf_testpoints_proj.plot(ax=base)
+# plot = gdf_testpoints_proj.plot(ax=base, markersize=10)
 # -
 
 # ### Use np.digitize() to assign coordinates to the grid
@@ -476,8 +479,8 @@ def reset_metrics(
 # Create 2 lists with a single entry (testpoint coordinate)
 
 # + tags=["active-ipynb"]
-# test_point_list_x = np.array([gdf_testpoints_proj[0].x, gdf_testpoints_proj[1].x])
-# test_point_list_y = np.array([gdf_testpoints_proj[0].y, gdf_testpoints_proj[1].y])
+# test_point_list_x = np.array([p.x for p in gdf_testpoints_proj])
+# test_point_list_y = np.array([p.y for p in gdf_testpoints_proj])
 # -
 
 # Find the nearest bin for x coordinate (returns the bin-index):
@@ -490,7 +493,7 @@ def reset_metrics(
 # Check value of bin (the y coordinate) based on returned index:
 
 # + tags=["active-ipynb"]
-# testpoint_xbin_idx = xbins[[x_bin[0], x_bin[1]]]
+# testpoint_xbin_idx = xbins[[x_bin[x] for x in range(0, len(x_bin))]]
 # display(testpoint_xbin_idx)
 # -
 
@@ -501,7 +504,7 @@ def reset_metrics(
 # display(y_bin)
 
 # + tags=["active-ipynb"]
-# testpoint_ybin_idx = ybins[[y_bin[0], y_bin[1]]]
+# testpoint_ybin_idx = ybins[[y_bin[x] for x in range(0, len(y_bin))]]
 # display(testpoint_ybin_idx)
 # -
 
@@ -519,7 +522,7 @@ def reset_metrics(
 
 # + tags=["active-ipynb"]
 # testpoint_grids = gp.GeoSeries(
-#     [grid.loc[testpoint_xbin_idx[0], testpoint_ybin_idx[0]].geometry, grid.loc[testpoint_xbin_idx[1], testpoint_ybin_idx[1]].geometry])
+#     [grid.loc[testpoint_xbin_idx[x], testpoint_ybin_idx[x]].geometry for x in range(0,len(gdf_testpoints))])
 # testpoint_grids.plot()
 # -
 
@@ -607,7 +610,7 @@ def get_best_bins(
 
 # + tags=["active-ipynb"]
 # %%time
-# df = pd.read_csv(SUNSET_FLICKR, usecols=usecols, dtype=dtypes, encoding='utf-8')
+# df = pd.read_csv(SUNRISE_FLICKR, usecols=usecols, dtype=dtypes, encoding='utf-8')
 # print(len(df))
 # -
 
@@ -701,7 +704,7 @@ def proj_df(df, proj_transformer: Transformer = PROJ_TRANSFORMER):
 
 # The next step is to union hll sets and (optionally) return the cardinality (the number of distinct elements). This can only be done by connecting to a postgres database with HLL extension installed. We're using our hlldb here, but it is equally possible to connect to an empty Postgres DB such as pg-hll-empty docker container.
 
-# + tags=["highlight_red", "active-ipynb"]
+# + tags=["active-ipynb"]
 # def union_hll(
 #     hll_series: pd.Series, cardinality: bool = True,
 #     db_calc: tools.DbConn = DB_CALC) -> pd.Series:
@@ -1147,7 +1150,7 @@ def bin_chunked_coordinates(
 #
 # <div class="alert alert-success">
 #     
-#     Usually, due to the <a href="https://en.wikipedia.org/wiki/Count-distinct_problem">Count Distinct Problem</a> increasing computation times will apply for more complex distinct queries. This is not the case when using HLL. Any count distinct (postcount, usercount etc.) requires the same amount of time. A useful metric introduced by Wood et al. (2013) is User Days, which lies inbetween Post Count and User Count because Users may be counted more than once if they visited the location on consecutive days. User Days particularly allows capturing the difference between local and tourist behaviour patterns. The rationale here is that locals visit few places very often. In contrast, tourists visit many places only once.
+# Usually, due to the <a href="https://en.wikipedia.org/wiki/Count-distinct_problem">Count Distinct Problem</a> increasing computation times will apply for more complex distinct queries. This is not the case when using HLL. Any count distinct (postcount, usercount etc.) requires the same amount of time. A useful metric introduced by Wood et al. (2013) is User Days, which lies inbetween Post Count and User Count because Users may be counted more than once if they visited the location on consecutive days. User Days particularly allows capturing the difference between local and tourist behaviour patterns. The rationale here is that locals visit few places very often. In contrast, tourists visit many places only once.
 #     
 # </div>
 #
@@ -1186,7 +1189,7 @@ def read_project_chunked(filename: str,
 # + tags=["active-ipynb"]
 # %%time
 # chunked_df = read_project_chunked(
-#     filename=SUNSET_FLICKR,
+#     filename=SUNRISE_FLICKR,
 #     usecols=usecols,
 #     bbox=bbox_italy_buf)
 # display(chunked_df[0].head())
@@ -1515,27 +1518,38 @@ def load_plot(
 
 # + tags=["active-ipynb"]
 # %%time
+# reset_metrics(grid)
 # load_plot(
 #     SUNRISE_FLICKR, grid, title=f'Estimated "Sunrise" Post Count (Flickr) per {km_size:.0f} km grid, 2007-2018',
 #     store_fig="flickr_postcount_sunrise_est.png", store_pickle="flickr_postcount_sunrise_est", store_benchmark_data=True)
 
 # + tags=["active-ipynb"]
 # %%time
+# reset_metrics(grid)
 # load_plot(
 #     SUNSET_INSTAGRAM, grid, title=f'Estimated "Sunset" Post Count (Instagram) per {km_size:.0f} km grid, Aug-Dec 2017',
 #     store_fig="instagram_postcount_sunset_est.png", store_pickle="instagram_postcount_sunset_est", store_benchmark_data=True)
 
 # + tags=["active-ipynb"]
 # %%time
+# reset_metrics(grid)
 # load_plot(
 #     SUNRISE_INSTAGRAM, grid, title=f'Estimated "Sunrise" Post Count (Instagram) per {km_size:.0f} km grid, Aug-Dec 2017',
 #     store_fig="instagram_postcount_sunrise_est.png", store_pickle="instagram_postcount_sunrise_est", store_benchmark_data=True)
 
 # + tags=["active-ipynb"]
 # %%time
+# reset_metrics(grid)
 # load_plot(
 #     ALL_FLICKR, grid, title=f'Estimated Post Count (Flickr total) per {km_size:.0f} km grid, 2007-2018',
 #     store_fig="flickr_postcount_all_est.png", store_pickle="flickr_postcount_all_est", store_benchmark_data=True)
+
+# + tags=["active-ipynb"]
+# %%time
+# reset_metrics(grid)
+# load_plot(
+#     RANDOM_INSTAGRAM, grid, title=f'Estimated Post Count (Instagram Random 20M) per {km_size:.0f} km grid',
+#     store_fig="instagram_postcount_random_est.png", store_pickle="instagram_postcount_random_est", store_benchmark_data=True)
 # -
 
 # # Plotting worldmaps: User Count
@@ -1544,6 +1558,7 @@ def load_plot(
 
 # + tags=["active-ipynb"]
 # %%time
+# reset_metrics(grid)
 # load_plot(
 #     SUNSET_FLICKR, grid, title=f'Estimated "Sunset" User Count (Flickr) per {km_size:.0f} km grid, 2007-2018',
 #     store_fig="flickr_usercount_sunset_est.png",
@@ -1576,9 +1591,19 @@ def load_plot(
 
 # + tags=["active-ipynb"]
 # %%time
+# reset_metrics(grid)
 # load_plot(
 #     ALL_FLICKR, grid, f'Flickr all User Counts (estimated) per {km_size:.0f} km grid, 2007-2018',
 #     store_fig="flickr_usercount_all_est.png", metric="usercount_est", store_pickle="flickr_usercount_all_est",
+#     store_benchmark_data=True)
+
+# + tags=["active-ipynb"]
+# %%time
+# reset_metrics(grid)
+# load_plot(
+#     RANDOM_INSTAGRAM, grid, title=f'Estimated User Count (Instagram Random 20M) per {km_size:.0f} km grid',
+#     store_fig="instagram_usercount_random_est.png",
+#     metric="usercount_est", store_pickle="instagram_usercount_random_est",
 #     store_benchmark_data=True)
 # -
 
@@ -1625,6 +1650,14 @@ def load_plot(
 #     ALL_FLICKR, grid, title=f'Flickr all User Days (estimated) per {km_size:.0f} km grid, 2007-2018',
 #     store_fig="flickr_userdays_all_est.png", 
 #     metric="userdays_est", store_pickle="flickr_userdays_all_est", store_benchmark_data=True)
+
+# + tags=["active-ipynb"]
+# %%time
+# reset_metrics(grid)
+# load_plot(
+#     RANDOM_INSTAGRAM, grid, title=f'Instagram User Days (estimated, Random 20M) per {km_size:.0f} km grid',
+#     store_fig="instagram_userdays_random_est.png", 
+#     metric="userdays_est", store_pickle="instagram_userdays_random_est", store_benchmark_data=True)
 # -
 
 # ## Merging Instagram Sunset and Sunrise data
@@ -1697,10 +1730,15 @@ def merge_instagram_sunsetsunrise(
 
 # + tags=["active-ipynb"]
 # pickles_path = OUTPUT / f"pickles{km_size_str}"
-# pickle_list = [
+# pickle_list_flickr = [
 #     pickles_path / "flickr_postcount_all_est.pkl",
 #     pickles_path / "flickr_usercount_all_est.pkl",
 #     pickles_path / "flickr_userdays_all_est.pkl"
+# ]
+# pickle_list_instagram = [
+#     pickles_path / "instagram_postcount_random_est.pkl",
+#     pickles_path / "instagram_usercount_random_est.pkl",
+#     pickles_path / "instagram_userdays_random_est.pkl"
 # ]
 # column_list = [
 #     "postcount_est",
@@ -1723,13 +1761,13 @@ def load_pickle_merge(pickle_list: List[Path], column_list: List[str]):
 
 
 # + tags=["active-ipynb"]
-# grid = load_pickle_merge(pickle_list, column_list)
+# grid = load_pickle_merge(pickle_list_flickr, column_list)
 # -
 
 # Have a look at the numbers for exact and estimated values. Smaller values are exact in both hll and raw because Sparse Mode is used.
 
 # + tags=["active-ipynb"]
-# grid[grid["usercount_est"]>5].head()
+# grid[grid["usercount_est"]>5].drop(columns=["geometry"]).head()
 # -
 
 # ## Load & store results from and to CSV
@@ -1751,6 +1789,18 @@ def grid_agg_tocsv(
 
 # + tags=["active-ipynb"]
 # grid_agg_tocsv(grid, "flickr_all_est.csv")
+# -
+
+# Repeat for Instagram
+
+# + tags=["active-ipynb"]
+# grid = load_pickle_merge(pickle_list_instagram, column_list)
+
+# + tags=["active-ipynb"]
+# grid.head()
+
+# + tags=["active-ipynb"]
+# grid_agg_tocsv(grid, "instagram_random_est.csv")
 
 # +
 def create_new_grid(
@@ -1870,7 +1920,7 @@ def grid_agg_fromcsv(
 # grid_agg_tocsv(grid, "flickr_sunrise_est.csv")
 # -
 
-# **Export selected CSV Benchmark HLL data for paper/public**
+# **ToDo: Export selected CSV Benchmark HLL data for paper/public**
 
 # Flickr sunrise:
 
@@ -1896,7 +1946,7 @@ def grid_agg_fromcsv(
 # DB_CONN.close()
 
 # + tags=["active-ipynb"]
-# !jupyter nbconvert --to Html_toc \
+# !jupyter nbconvert --to html_toc \
 #     --output-dir=../out/html{km_size_str} ./01_grid_agg.ipynb \
 #     --template=../nbconvert.tpl \
 #     --ExtractOutputPreprocessor.enabled=False >&- 2>&-  # create single output file

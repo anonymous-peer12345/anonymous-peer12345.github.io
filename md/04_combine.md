@@ -6,7 +6,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.13.7
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: worker_env
     language: python
@@ -20,17 +20,18 @@ _<a href= "mailto:alexander.dunkel@tu-dresden.de">Alexander Dunkel</a>, TU Dresd
 
 ----------------
 
-```python tags=["hide_code", "active-ipynb"]
+```python tags=["hide_code", "active-ipynb"] jupyter={"source_hidden": true}
 from IPython.display import Markdown as md
 from datetime import date
 
 today = date.today()
-md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 ```
 
 # Introduction
 
-This is the fourth notebook in a series of eight notebooks:
+This is the fourth notebook in a series of nine notebooks:
 
 1. the grid aggregation notebook (01_gridagg.ipynb) is used to aggregate data from HLL sets at GeoHash 5 to a 100x100km grid  
 2. the visualization notebook (02_visualization.ipynb) is used to create interactive maps, with additional information shown on hover
@@ -61,7 +62,7 @@ In this notebook, the negative category range (blue colors) is used to represent
 
 Import code from other jupyter notebooks, synced to *.py with jupytext:
 
-```python
+```python tags=[]
 import sys
 from pathlib import Path
 module_path = str(Path.cwd().parents[0] / "py")
@@ -69,6 +70,12 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 # import all previous chained notebooks
 from _03_chimaps import *
+from modules import preparations
+```
+
+```python tags=["active-ipynb"]
+preparations.init_imports()
+WEB_DRIVER = preparations.load_chromedriver()
 ```
 
 # Parameters
@@ -631,24 +638,6 @@ Copy single HTML file to resource folder
 
 ```python tags=["active-ipynb"]
 !cp ../out/html{km_size_str}/04_combine.html ../resources/html/
-```
-
-**Create release file with all results**
-
-Create a release file that contains ipynb notebooks, HTML, figures and python converted files.
-
-Make sure that 7z is available (`apt-get install p7zip-full`)
-
-```python tags=["active-ipynb"]
-!cd .. && 7z a -tzip out/release_v0.5.0.zip \
-    md/* py/* out/html/* out/figures/* notebooks/*.ipynb \
-    README.md jupytext.toml nbconvert.tpl \
-    -x!py/__pycache__ -x!py/modules/__pycache__ -x!py/modules/.ipynb_checkpoints \
-    -y > /dev/null
-```
-
-```python
-
 ```
 
 ```python

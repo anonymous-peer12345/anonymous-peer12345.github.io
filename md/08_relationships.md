@@ -5,7 +5,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.13.7
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: worker_env
     language: python
@@ -19,12 +19,13 @@ _<a href= "mailto:alexander.dunkel@tu-dresden.de">Alexander Dunkel</a>, TU Dresd
 
 ----------------
 
-```python tags=["active-ipynb", "hide_code"]
+```python tags=["active-ipynb", "hide_code"] jupyter={"source_hidden": true}
 from IPython.display import Markdown as md
 from datetime import date
 
 today = date.today()
-md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 ```
 
 # Introduction
@@ -215,8 +216,8 @@ def relationship_plot(
     figsize: Tuple[int, int] = (7, 7),
     plot_context: str = "100 km grid bin"):
     """Create relationship plot"""
-    f, ax = plt.subplots(figsize=figsize)
-    f.suptitle(
+    fig, ax = plt.subplots(figsize=figsize)
+    fig.suptitle(
         title,
         fontsize=12, y=0)
     scatterplot_kwarg = {
@@ -734,7 +735,7 @@ def annotate_countries_adjust(
 def country_rel_plot(
     df: pd.DataFrame, topic1="flickr", topic2="instagram",
     plot_context="Flickr",
-    store_fig: str = None,
+    filename: str = None,
     output: Path = OUTPUT,
     metric = METRIC,
     annotate_countries: bool = None,
@@ -800,11 +801,15 @@ def country_rel_plot(
         x_col=x_col,
         y_col=y_col,
         ranked=True)
-    if store_fig:
-        print("Storing figure as png..")
+    if filename:
+        print("Storing figure as png and svg..")
         fig.savefig(
-            output / f"figures" / store_fig, dpi=300, format='PNG',
-            bbox_inches='tight', pad_inches=1)
+            output / f"figures" / f"{filename}.png", dpi=300, format='PNG',
+            bbox_inches='tight', pad_inches=1, facecolor="white")
+        # also save as svg
+        fig.savefig(
+            output / "svg" / f"{filename}.svg", format='svg',
+            bbox_inches='tight', pad_inches=1, facecolor="white")
 ```
 
 ```python
@@ -856,7 +861,7 @@ Plot map
 ```python
 country_rel_plot(
     df, plot_context="Flickr", topic1="sunrise", topic2="sunset", annotate_countries=True,
-    store_fig="sunrise_sunset_relationship_countries_flickr.png", metric=METRIC)
+    filename="sunrise_sunset_relationship_countries_flickr", metric=METRIC)
 ```
 
 ### Repeat for Instagram
@@ -905,7 +910,7 @@ df = join_dfs_apply(df_sunrise, df_sunset, topic1="sunrise", topic2="sunset", me
 ```python
 country_rel_plot(
     df, plot_context=f"{load_kwds.get('source').title()}", topic1="sunrise", topic2="sunset", annotate_countries=True,
-    store_fig=f"sunrise_sunset_relationship_countries_instagram.png", metric=METRIC)
+    filename=f"sunrise_sunset_relationship_countries_instagram", metric=METRIC)
 ```
 
 ### Repeat for Instagram and Flickr
@@ -933,7 +938,7 @@ df = join_dfs_apply(df_flickr, df_instagram, topic1="flickr", topic2="instagram"
 ```python
 country_rel_plot(
     df, plot_context=f"Sunrise reactions", annotate_countries=True, topic1="flickr", topic2="instagram",
-    store_fig=f"instagram_flickr_relationship_countries_sunrise.png", metric=METRIC)
+    filename=f"instagram_flickr_relationship_countries_sunrise", metric=METRIC)
 ```
 
 ### Repeat for Instagram/Flickr bias
@@ -963,7 +968,7 @@ df.head()
 country_rel_plot(
     df, topic1="flickr", topic2="instagram",
     plot_context="Sunset reactions",
-    store_fig="instagram_flickr_relationship_countries_sunset.png", annotate_countries=True)
+    filename="instagram_flickr_relationship_countries_sunset", annotate_countries=True)
 ```
 
 ## Relationships for Chi
@@ -995,7 +1000,7 @@ df.head()
 country_rel_plot(
     df, topic1="sunrise", topic2="sunset", metric='chi_value', ranked=False,
     plot_context="Chi value Flickr",
-    store_fig="sunrise_sunset_relationship_countries_flickr_chi.png", annotate_countries=True)
+    filename="sunrise_sunset_relationship_countries_flickr_chi", annotate_countries=True)
 ```
 
 ```python
@@ -1019,7 +1024,7 @@ df = join_dfs_apply(
 country_rel_plot(
     df, topic1="sunrise", topic2="sunset", metric='chi_value', ranked=False,
     plot_context="Chi value Instagram",
-    store_fig="sunrise_sunset_relationship_countries_instagram_chi.png", annotate_countries=True)
+    filename="sunrise_sunset_relationship_countries_instagram_chi", annotate_countries=True)
 ```
 
 ```python
@@ -1043,7 +1048,7 @@ df = join_dfs_apply(
 country_rel_plot(
     df, topic1="flickr", topic2="instagram", metric='chi_value', ranked=False,
     plot_context="Chi value Sunrise",
-    store_fig="instagram_flickr_relationship_countries_sunrise_chi.png", annotate_countries=True)
+    filename="instagram_flickr_relationship_countries_sunrise_chi", annotate_countries=True)
 ```
 
 ```python
@@ -1067,7 +1072,7 @@ df = join_dfs_apply(
 country_rel_plot(
     df, topic1="flickr", topic2="instagram", metric='chi_value', ranked=False,
     plot_context="Chi value Sunset",
-    store_fig="instagram_flickr_relationship_countries_sunrise_chi.png", annotate_countries=True)
+    filename="instagram_flickr_relationship_countries_sunrise_chi", annotate_countries=True)
 ```
 
 ## Store generated graphics as tabbed HTML

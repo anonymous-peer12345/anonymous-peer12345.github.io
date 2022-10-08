@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # ---
 # jupyter:
 #   jupytext:
@@ -6,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.13.7
+#       jupytext_version: 1.14.0
 #   kernelspec:
 #     display_name: worker_env
 #     language: python
@@ -19,12 +18,13 @@
 #
 # ----------------
 
-# + tags=["hide_code", "active-ipynb"]
+# + tags=["hide_code", "active-ipynb"] jupyter={"source_hidden": true}
 # from IPython.display import Markdown as md
 # from datetime import date
 #
 # today = date.today()
-# md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+# with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+# md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 # -
 
 # # Introduction
@@ -44,10 +44,9 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 # import all previous chained notebooks
 from _04_combine import *
-
-# + tags=["active-ipynb"]
-# preparations.init_imports()
-# -
+from modules import preparations
+preparations.init_imports()
+WEB_DRIVER = preparations.load_chromedriver()
 
 # Load additional dependencies
 
@@ -297,7 +296,7 @@ def grid_assign_country(
         country_col] = bin_country_maxarea[country_col]
     # drop index columns not needed anymore
     grid.drop(
-        ["xbin", "ybin"], 1, inplace=True)
+        ["xbin", "ybin"], axis=1, inplace=True)
 
 
 # ### Optional: TFIDF country data
@@ -601,7 +600,7 @@ def merge_countries_grid(
 def group_union_cardinality(
     countries: gp.GeoDataFrame, grid: gp.GeoDataFrame, 
     db_conn: tools.DbConn, 
-    metric_hll: str = "userdays_hll",
+    metric_hll: str = "usercount_hll",
     country_col: str = COUNTRY_COL,
     grid_countries_pickle: Optional[Path] = None):
     """Group hll sets per country and assign cardinality to countries
@@ -652,7 +651,7 @@ def country_agg_frompickle(
     grid_pickle: Path, db_conn: tools.DbConn,
     ne_path: Path = NE_PATH, ne_filename: str = NE_FILENAME, 
     ne_uri: str = NE_URI, country_col: str = COUNTRY_COL,
-    metric_hll: str = "userdays_hll") -> gp.GeoDataFrame:
+    metric_hll: str = "usercount_hll") -> gp.GeoDataFrame:
     """Load grid pickle, load country shapefile, join cardinality to country
     and return country GeoDataFrame"""
     # prepare country gdf
@@ -706,9 +705,11 @@ def country_agg_frompickle(
 #
 # For chi, we need to combine results from expected versus observed per country. Basically, repeat the grid chi aggregation, just for countries.
 
-# + tags=["active-ipynb"]
-# CHI_COLUMN = f"usercount_est"
-# metric = CHI_COLUMN.replace("_est", "")
+# + tags=[]
+CHI_COLUMN = f"usercount_est"
+METRIC = CHI_COLUMN.replace("_est", "")
+
+
 # -
 
 # Calculate chi value according to [03_combine.ipynb](03_combine.ipynb)
@@ -716,10 +717,10 @@ def country_agg_frompickle(
 # + tags=["active-ipynb"]
 # %%time
 # world_observed = country_agg_frompickle(
-#     grid_pickle=OUTPUT / f"pickles_50km" / f"flickr_{metric}_sunset_est_hll.pkl",
+#     grid_pickle=OUTPUT / f"pickles_50km" / f"flickr_{METRIC}_sunset_est_hll.pkl",
 #     db_conn=db_conn, metric_hll=CHI_COLUMN.replace("_est", "_hll"))
 # world_expected = country_agg_frompickle(
-#     grid_pickle=OUTPUT / f"pickles_50km" / f"flickr_{metric}_all_est_hll.pkl",
+#     grid_pickle=OUTPUT / f"pickles_50km" / f"flickr_{METRIC}_all_est_hll.pkl",
 #     db_conn=db_conn, metric_hll=CHI_COLUMN.replace("_est", "_hll"))
 # -
 
@@ -751,31 +752,34 @@ def calculate_country_chi(
 # + tags=["active-ipynb"]
 # %%time
 # world_expected_observed = calculate_country_chi(world_expected, world_observed)
+
+# + tags=["active-ipynb"]
+# world_expected_observed.head()
+
+# + tags=["active-ipynb"]
+# fig, ax = plt.subplots(1, 1, figsize=(22,28))
+# world_expected_observed.plot(
+#     column='chi_value',
+#     cmap='OrRd',
+#     ax=ax,
+#     linewidth=0.2,
+#     edgecolor='grey',
+#     legend=True,
+#     scheme='headtail_breaks')
 # -
-
-world_expected_observed.head()
-
-fig, ax = plt.subplots(1, 1, figsize=(22,28))
-world_expected_observed.plot(
-    column='chi_value',
-    cmap='OrRd',
-    ax=ax,
-    linewidth=0.2,
-    edgecolor='grey',
-    legend=True,
-    scheme='headtail_breaks')
-
 
 # Store full country chi gdf as CSV (used in 06_relationships.ipynb):
 
 # + tags=["active-ipynb"]
-# cols: List[str] = [f"{metric}_est_expected", f"{metric}_est", "chi_value", "significant"]
-# world_expected_observed.to_csv(OUTPUT / "csv" / f"countries_{metric}_chi_flickr_sunset.csv", mode='w', columns=cols, index=True)
+# cols: List[str] = [f"{METRIC}_est_expected", f"{METRIC}_est", "chi_value", "significant"]
+# world_expected_observed.to_csv(OUTPUT / "csv" / f"countries_{METRIC}_chi_flickr_sunset.csv", mode='w', columns=cols, index=True)
 # -
 
 # Combine everything in one function:
 
-def load_store_country_chi(topic: str, source: str, metric: str, flickrexpected: bool = True):
+def load_store_country_chi(
+    topic: str, source: str, metric: str = METRIC, flickrexpected: bool = False, return_gdf: bool = None,
+    store_csv: bool = False):
     """Load, calculate and plot country chi map based on topic (sunset, sunrise)
     and source (instagram, flickr)
     """
@@ -786,7 +790,7 @@ def load_store_country_chi(topic: str, source: str, metric: str, flickrexpected:
         metric_hll=f"{metric}_hll")
     if not flickrexpected and source == "instagram":
         # expected all not available for Instagram
-        expected = f"{source}_{metric}_sunsetsunrise"
+        expected = f"{source}_{metric}_random"
     else:
         expected = f'flickr_{metric}_all'
     world_expected = country_agg_frompickle(
@@ -801,10 +805,13 @@ def load_store_country_chi(topic: str, source: str, metric: str, flickrexpected:
         f"{metric}_est_expected", f"{metric}_est", "chi_value", "significant"]
     ext = ""
     if flickrexpected and source == "instagram":
-        ext = "_fe"        
-    world_expected_observed.to_csv(
-        OUTPUT / "csv" / f"countries_{metric}_chi_{source}_{topic}{ext}.csv",
-        mode='w', columns=cols, index=True)
+        ext = "_fe"
+    if store_csv:
+        world_expected_observed.to_csv(
+            OUTPUT / "csv" / f"countries_{metric}_chi_{source}_{topic}{ext}.csv",
+            mode='w', columns=cols, index=True)
+    if return_gdf:
+        return world_expected_observed
 
 
 # Repeat for userdays:
@@ -812,115 +819,882 @@ def load_store_country_chi(topic: str, source: str, metric: str, flickrexpected:
 # + tags=["active-ipynb"]
 # %%time
 # load_store_country_chi(
-#     topic="sunset", source="flickr", metric="userdays")
+#     topic="sunset", source="flickr", metric="userdays", store_csv = True)
 # -
 
 # **Repeat for postcount:**
 
+# + tags=["active-ipynb"]
 # %%time
-load_store_country_chi(
-    topic="sunrise", source="flickr", metric="postcount")
+# load_store_country_chi(
+#     topic="sunrise", source="flickr", metric="postcount", store_csv = True)
 
+# + tags=["active-ipynb"]
 # %%time
-load_store_country_chi(
-    topic="sunset", source="flickr", metric="postcount")
+# load_store_country_chi(
+#     topic="sunset", source="flickr", metric="postcount", store_csv = True)
 
+# + tags=["active-ipynb"]
 # %%time
-load_store_country_chi(
-    topic="sunrise", source="instagram", metric="postcount")
+# load_store_country_chi(
+#     topic="sunrise", source="instagram", metric="postcount", store_csv = True)
 
+# + tags=["active-ipynb"]
 # %%time
-load_store_country_chi(
-    topic="sunset", source="instagram", metric="postcount")
-
+# load_store_country_chi(
+#     topic="sunset", source="instagram", metric="postcount", store_csv = True)
+# -
 
 # **Repeat for Sunrise**
 
 # + tags=["active-ipynb"]
 # %%time
 # load_store_country_chi(
-#     topic="sunrise", source="flickr", metric="usercount")
+#     topic="sunrise", source="flickr", metric="usercount", store_csv = True)
 
 # + tags=["active-ipynb"]
 # load_store_country_chi(
-#     topic="sunrise", source="flickr", metric="userdays")
+#     topic="sunrise", source="flickr", metric="userdays", store_csv = True)
 # -
 
-# **Repeat for Instagram sunset & sunrise**
+# **Repeat for Instagram**
 
 # + tags=["active-ipynb"]
 # %%time
 # load_store_country_chi(
-#     topic="sunrise", source="instagram", metric="usercount")
+#     topic="sunrise", source="instagram", metric="usercount", store_csv = True)
 
 # + tags=["active-ipynb"]
 # %%time
 # load_store_country_chi(
-#     topic="sunrise", source="instagram", metric="userdays")
+#     topic="sunrise", source="instagram", metric="userdays", store_csv = True)
 
 # + tags=["active-ipynb"]
 # %%time
 # load_store_country_chi(
-#     topic="sunset", source="instagram", metric="usercount")
+#     topic="sunset", source="instagram", metric="usercount", store_csv = True)
 
 # + tags=["active-ipynb"]
 # load_store_country_chi(
-#     topic="sunset", source="instagram", metric="userdays")
+#     topic="sunset", source="instagram", metric="userdays", store_csv = True)
 # -
 
-# ## Plot Chi Maps
+# # Visualization
 
 # Plot Interactive Country chi maps (diverging colormap).
-# - Flickr Sunset (1) + Sunrise (2)
-# - and Instagram Sunset (3) + Sunrise (4)
 #
 # **ToDo**: The code below is very similar to the one in `03_chimaps.ipynb` and `06_semantics.ipynb`. Can be reduced significantly with deduplication and refactoring.
 
 # Prepare methods. The first one is needed to plot country polygons in `hv` using geoviews `gv.Polygons`. The syntax is very similar to `convert_gdf_to_gvimage()`. There are further slight adjustments necessary to other methods, which are copied from previous notebooks.
+#
+# We also need to create a [pooled classification](https://geographicdata.science/book/notebooks/05_choropleth.html#pooled-classifications), meaning that all values for all maps are used to create scheme breaks, and then those global breaks are used across maps to classify bins. This allows use to compare maps.
 
-def convert_gdf_to_gvpolygons(
-        poly_gdf: gp.GeoDataFrame, metric: str, cat_count: Optional[int] = None, 
-        cat_min: Optional[int] = None, cat_max: Optional[int] = None,
-        hover_items: Dict[str, str] = None) -> gv.Polygons:
-    """Convert GeoDataFrame to gv.polygons using categorized
-    metric column as value dimension
-    
-    Args:
-        poly_gdf: A geopandas geodataframe with  
-            (projected coordinates) and aggregate metric column
-        metric: target column for value dimension.
-            "_cat" will be added to retrieve classified values.
-        cat_count: number of classes for value dimension
-        hover_items: a dictionary with optional names 
-            and column references that are included in 
-            gv.Image to provide additional information
-            (e.g. on hover)
-    """
-    if cat_count:
-        cat_min = 0
-        cat_max = cat_count
-    else:
-        if any([cat_min, cat_max]) is None:
-            raise ValueError(
-                "Either provide cat_count or cat_min and cat_max.")
-    if hover_items is None:
-        hover_items_list = []
-    else:
-        hover_items_list = [
-            v for v in hover_items.values()]
-    # convert GeoDataFrame to gv.Polygons Layer
-    # the first vdim is the value being used 
-    # to visualize classes on the map
-    # include additional_items (postcount and usercount)
-    # to show exact information through tooltip
-    gv_layer = gv.Polygons(
-        poly_gdf,
-        vdims=[
-            hv.Dimension(
-                f'{metric}_cat', range=(cat_min, cat_max))]
-            + hover_items_list,
-        crs=crs.Mollweide())
-    return gv_layer
+# + tags=["active-ipynb"]
+# def convert_gdf_to_gvpolygons(
+#         poly_gdf: gp.GeoDataFrame, metric: str = METRIC, cat_count: Optional[int] = None, 
+#         cat_min: Optional[int] = None, cat_max: Optional[int] = None,
+#         hover_items: Dict[str, str] = None) -> gv.Polygons:
+#     """Convert GeoDataFrame to gv.polygons using categorized
+#     metric column as value dimension
+#     
+#     Args:
+#         poly_gdf: A geopandas geodataframe with  
+#             (projected coordinates) and aggregate metric column
+#         metric: target column for value dimension.
+#             "_cat" will be added to retrieve classified values.
+#         cat_count: number of classes for value dimension
+#         hover_items: a dictionary with optional names 
+#             and column references that are included in 
+#             gv.Image to provide additional information
+#             (e.g. on hover)
+#     """
+#     if cat_count:
+#         cat_min = 0
+#         cat_max = cat_count
+#     else:
+#         if any([cat_min, cat_max]) is None:
+#             raise ValueError(
+#                 "Either provide cat_count or cat_min and cat_max.")
+#     if hover_items is None:
+#         hover_items_list = []
+#     else:
+#         hover_items_list = [
+#             v for v in hover_items.values()]
+#     # convert GeoDataFrame to gv.Polygons Layer
+#     # the first vdim is the value being used 
+#     # to visualize classes on the map
+#     # include additional_items (postcount and usercount)
+#     # to show exact information through tooltip
+#     gv_layer = gv.Polygons(
+#         poly_gdf,
+#         vdims=[
+#             hv.Dimension(
+#                 f'{metric}_cat', range=(cat_min, cat_max))]
+#             + hover_items_list,
+#         crs=crs.Mollweide())
+#     return gv_layer
+# -
+
+# Derived from `get_classify_image`:
+
+# + tags=["active-ipynb"]
+# def compile_diverging_poly_layer(
+#         poly_gdf: gp.GeoDataFrame, series_plus: pd.Series,
+#         series_minus: pd.Series,
+#         metric: str = "chi_value", responsive: bool = None,
+#         hover_items: Dict[str, str] = hover_items,
+#         mask_nonsignificant: bool = False,
+#         add_notopicdata_label: str = None,
+#         scheme: str = "HeadTailBreaks",
+#         cmaps_diverging: Tuple[str] = ("OrRd", "Blues"),
+#         add_nodata_label: str = "#FFFFFF",
+#         true_negative: bool = True,
+#         bounds_plusminus: Tuple[List[str], List[str]] = (None, None),
+#         schemebreaks_plusminus: Tuple["mc.classifier", "mc.classifier"] = (None, None)):
+#     """Modified function to get/combine diverging image layer
+#     
+#     Additional Args:
+#         series_plus: Series of values to show on plus y range cmap
+#         series_minus: Series of values to show on minus y range cmap
+#         cmaps_diverging: Tuple with plus and minus cmap reference
+#         bounds: Optional predefined bounds (map comparison)
+#         scheme_breaks: Optional predefined scheme_breaks (map comparison)
+#     """
+#     ##stats = {}
+#     div_labels: List[Dict[int, str]] = []
+#     div_cmaps: List[List[str]] = []
+#     cat_counts: List[int] = []
+#     div_bounds: List[List[float]] = []
+#     spare_cats = 0
+#     plus_offset = 0
+#     offset = 0
+#     for ix, series_nan in enumerate([series_plus, series_minus]):
+#         # classify values for both series
+#         cmap_name = cmaps_diverging[ix]
+#         if bounds_plusminus[ix] and schemebreaks_plusminus[ix]:
+#             # get predifined breaks
+#             bounds = bounds_plusminus[ix]
+#             scheme_breaks = schemebreaks_plusminus[ix]
+#         else:
+#             # calculate new
+#             bounds, scheme_breaks = classify_data(
+#                 values_series=series_nan, scheme=scheme)
+#         div_bounds.append(bounds)
+#         # assign categories column
+#         cat_series = scheme_breaks.find_bin(
+#             np.abs(series_nan.values))
+#         cat_count = scheme_breaks.k
+#         color_count = scheme_breaks.k + offset
+#         cmap_list = get_cmap_list(
+#             cmap_name, length_n=color_count)
+#         if ix == 0:
+#             if add_notopicdata_label:
+#                 # add grey color
+#                 plus_offset = 1
+#                 prepend_color(
+#                     cmap_list=cmap_list, color_hex=add_notopicdata_label)
+#             if add_nodata_label:
+#                 # offset
+#                 spare_cats = 1
+#                 prepend_color(
+#                     cmap_list=cmap_list, color_hex=add_nodata_label)
+#             cat_count += (offset+plus_offset)
+#             # nodata label as explicit category in legend
+#             # values will not be rendered on map (cat = nan):
+#             # increment cat count, but not series
+#             cat_series += (offset+plus_offset+spare_cats)
+#         if ix == 1:
+#             cat_count += offset
+#             # cat labels always prepended with minus sign (-)
+#             cat_series = np.negative(cat_series)
+#             # offset
+#             cat_series -= (1+offset)
+#         cat_counts.append(cat_count)
+#         div_cmaps.append(cmap_list)
+#         # assign categories
+#         poly_gdf.loc[series_nan.index, f'{metric}_cat'] = cat_series.astype(str)
+#     # general application:
+#     # assign special cat labels to data
+#     assign_special_categories(
+#         grid=poly_gdf, series_plus=series_plus, series_minus=series_minus,
+#         metric=metric, add_notopicdata_label=add_notopicdata_label,
+#         add_underrepresented_label=offset,
+#         add_nodata_label=add_nodata_label, mask_nonsignificant=mask_nonsignificant)
+#     # clean na() values !important
+#     mask = (poly_gdf[f'{metric}_cat'].isna())
+#     poly_gdf.loc[
+#         mask,
+#         f'{metric}_cat'] = '0'
+#     # poly_gdf[f'{metric}_cat'] = poly_gdf[f'{metric}_cat'].astype(str)
+#     # allow label cat to be shown on hover
+#     poly_gdf.loc[poly_gdf.index, f"{metric}_cat_label"] = poly_gdf[f"{metric}_cat"]
+#     hover_items['Label Cat'] = 'chi_value_cat_label'
+#     # special categories
+#     kwargs = {
+#         "mask_nonsignificant":mask_nonsignificant,
+#         "add_nodata_label":add_nodata_label,
+#         "add_notopicdata_label":add_notopicdata_label,
+#         "true_negative":true_negative,
+#         "offset":offset
+#     }
+#     label_dict = create_diverging_labels(
+#         div_bounds, **kwargs)
+#     # adjust tick positions, 
+#     # due to additional no_data_label
+#     # shown in legend only
+#     if add_nodata_label:
+#         label_dict = update_tick_positions(label_dict)
+#     # reverse colors of minus cmap
+#     # div_cmaps[1].reverse()
+#     # combine cmaps
+#     cmap_nodata_list = div_cmaps[1] + div_cmaps[0]
+#     cmap = colors.ListedColormap(cmap_nodata_list)
+#     # create gv.image layer from gdf
+#     gv_poly = convert_gdf_to_gvpolygons(
+#             poly_gdf=poly_gdf,
+#             metric=metric, cat_min=-cat_counts[1],
+#             cat_max=cat_counts[0],
+#             hover_items=hover_items)
+#     poly_layer = apply_polylayer_opts(
+#         gv_poly=gv_poly, cmap=cmap, label_dict=label_dict,
+#         responsive=responsive, hover_items=hover_items)
+#     return poly_layer    
+
+# + tags=["active-ipynb"]
+# def apply_polylayer_opts(
+#     gv_poly: gv.Polygons, cmap: colors.ListedColormap,
+#     label_dict: Dict[str, str], responsive: bool = None,
+#     hover_items: Dict[str, str] = None) -> gv.Image:
+#     """Apply geoviews polygons layer opts
+#
+#     Args:
+#         gv_poly: A classified gv.Polygons layer
+#         responsive: Should be True for interactive HTML output.
+#         hover_items: additional items to show on hover
+#         cmap: A matplotlib colormap to colorize values and show as legend.
+#     """
+#     if hover_items is None:
+#         hover_items = {
+#         'Post Count (estimated)':'postcount_est', 
+#         'User Count (estimated)':'usercount_est',
+#         'User Days (estimated)':'userdays_est'}
+#     color_levels = len(cmap.colors)
+#     # define additional plotting parameters
+#     # width of static jupyter map,
+#     # 360° == 1200px
+#     width = 1200
+#     # height of static jupyter map,
+#     # 360°/2 == 180° == 600px
+#     height = int(width/2) 
+#     aspect = None
+#     # if stored as html,
+#     # override values
+#     if responsive:
+#         width = None
+#         height = None
+#     # define width and height as optional parameters
+#     # only used when plotting inside jupyter
+#     optional_kwargs = dict(width=width, height=height)
+#     # compile only values that are not None into kwargs-dict
+#     # by using dict-comprehension
+#     optional_kwargs_unpack = {
+#         k: v for k, v in optional_kwargs.items() if v is not None}
+#     # prepare custom HoverTool
+#     tooltips = get_custom_tooltips(
+#         hover_items)
+#     hover = HoverTool(tooltips=tooltips)
+#     # get tick positions from label dict keys
+#     ticks = [key for key in sorted(label_dict)]
+#     # create image layer
+#     return gv_poly.sort('chi_value_cat').opts(
+#             show_legend=True,
+#             color_levels=color_levels,
+#             cmap=cmap,
+#             colorbar=True,
+#             line_color='grey',
+#             line_width=0.3,
+#             clipping_colors={'NaN': 'transparent'},
+#             colorbar_opts={
+#                 # 'formatter': formatter,
+#                 'major_label_text_align':'left',
+#                 'major_label_overrides': label_dict,
+#                 'ticker': FixedTicker(
+#                     ticks=ticks),
+#                 },
+#             tools=[hover],
+#             # optional unpack of width and height
+#             **optional_kwargs_unpack
+#         )
+
+# + tags=["active-ipynb"]
+# def combine_gv_layers(
+#         poly_layer: gv.Polygons, edgecolor: str = 'black',
+#         fill_color: str = '#dbdbdb', alpha: float = 0.15) -> gv.Overlay:
+#     """Combine layers into single overlay and set global plot options"""
+#     # fill_color = '#479AD4'
+#     # fill_color = '#E9EDEC'
+#     gv_layers = []
+#     gv_layers.append(
+#         gf.land.opts(
+#             alpha=alpha, fill_color=fill_color, line_width=0.5))
+#     gv_layers.append(
+#         poly_layer)
+#     return gv.Overlay(gv_layers)
+# -
+
+from typing import Any
+def get_gobal_scheme_breaks(
+    series: pd.Series, scheme: str = "HeadTailBreaks") -> Tuple[Any, Any]:
+        bounds, scheme_breaks = classify_data(
+            values_series=series, scheme=scheme)
+        return bounds, scheme_breaks
+
+
+def get_combine_plus_minus(list_df: List[pd.DataFrame], mask_nonsignificant: bool = False,
+    metric: str = "chi_value") -> Tuple[pd.Series, pd.Series]:
+    """Merge (concat) all metric values of all dataframes to a single series. Returns
+    two merged series for positive and negative values"""
+    base_kwargs = {
+        "mask_nonsignificant":mask_nonsignificant,
+        "metric":metric}
+    combined_plusminus = []
+    mask_kwargs = ["mask_negative", "mask_positive"]
+    for ix, mask_kwarg in enumerate(mask_kwargs):
+        # merge two dictionaries
+        kwargs = base_kwargs | { mask_kwarg:True }
+        series_combined = None
+        for df in list_df:
+            df_copy = df.copy()
+            masked_series = mask_series(
+                grid=df_copy,
+                **kwargs)
+            if series_combined is None:
+                series_combined = masked_series
+                continue
+            series_combined = pd.concat(
+                [series_combined, masked_series], axis=0, 
+                ignore_index=True)
+        combined_plusminus.append(series_combined)
+    return (combined_plusminus[0], combined_plusminus[1])
+
+
+# + tags=["active-ipynb"]
+# def plot_diverging_poly(poly_gdf: gp.GeoDataFrame, title: str,
+#     hover_items: Dict[str, str] = {
+#         'Post Count (estimated)':'postcount_est', 
+#         'User Count (estimated)':'usercount_est',
+#         'User Days (estimated)':'userdays_est'},
+#     mask_nonsignificant: bool = False,
+#     scheme: str = "HeadTailBreaks",
+#     cmaps_diverging: Tuple[str] = ("OrRd", "Blues"),
+#     store_html: str = None,
+#     plot: Optional[bool] = True,
+#     output: Optional[str] = OUTPUT,
+#     nodata_color: str = "#FFFFFF",
+#     notopicdata_color: str = None,
+#     true_negative: bool = True,
+#     bounds_plusminus: Tuple[List[str], List[str]] = (None, None),
+#     schemebreaks_plusminus: Tuple["mc.classifier", "mc.classifier"] = (None, None)) -> gv.Overlay:
+#     """Plot interactive map with holoviews/geoviews renderer
+#
+#     Args:
+#         grid: A geopandas geodataframe with indexes x and y 
+#             (projected coordinates) and aggregate metric column
+#         metric: target column for aggregate. Default: postcount.
+#         store_html: Provide a name to store figure as interactive HTML.
+#         title: Title of the map
+#         cmaps_diverging: Tuple for colormaps to use.
+#         hover_items: additional items to show on hover
+#         mask_nonsignificant: transparent bins if significant column == False
+#         scheme: The classification scheme to use. Default "HeadTailBreaks".
+#         cmap: The colormap to use. Default "OrRd".
+#         plot: Prepare gv-layers to be plotted in notebook.
+#         true_negative: Whether "minus" values should show "-" in legend.
+#     """
+#     # work on a shallow copy,
+#     # to not modify original dataframe
+#     poly_gdf_plot = poly_gdf.copy()
+#     poly_gdf_plot['SU_A3'] = poly_gdf_plot.index
+#      # check if all additional items are available
+#     for key, item in list(hover_items.items()):
+#         if item not in poly_gdf_plot.columns:
+#             hover_items.pop(key)
+#     # chi layer opts
+#     base_kwargs = {
+#         "mask_nonsignificant":mask_nonsignificant,
+#         "metric":"chi_value",
+#     }
+#     # classify based on positive and negative chi
+#     series_plus = mask_series(
+#         grid=poly_gdf_plot,
+#         mask_negative=True,
+#         **base_kwargs)
+#     series_minus = mask_series(
+#         grid=poly_gdf_plot,
+#         mask_positive=True, 
+#         **base_kwargs)
+#     # global plotting options for value layer
+#     layer_opts = {
+#         "poly_gdf":poly_gdf_plot,
+#         "series_plus":series_plus,
+#         "series_minus":series_minus,
+#         "responsive":False,
+#         "scheme":scheme,
+#         "hover_items":hover_items,
+#         "cmaps_diverging":cmaps_diverging,
+#         "add_nodata_label":nodata_color,
+#         "add_notopicdata_label":notopicdata_color,
+#         "true_negative":true_negative,
+#         "bounds_plusminus":bounds_plusminus,
+#         "schemebreaks_plusminus":schemebreaks_plusminus
+#     }    
+#     # global plotting options for all layers (gv.Overlay)
+#     gv_opts = {
+#         "bgcolor":None,
+#         # "global_extent":True,
+#         "projection":crs.Mollweide(),
+#         "responsive":False,
+#         "data_aspect":1, # maintain fixed aspect ratio during responsive resize
+#         "hooks":[set_active_tool],
+#         "title":title
+#     }
+#     # get global plotting bounds/breaks for consistent scheme across all maps
+#     
+#     # plot responsive (html) or non-responsive (interactive)
+#     if plot:
+#         # get classified gv poly layer
+#         poly_layer = compile_diverging_poly_layer(
+#             **layer_opts, **base_kwargs)
+#         gv_layers = combine_gv_layers(
+#             poly_layer, fill_color=nodata_color, alpha=0.5)
+#     if store_html:
+#         layer_opts["responsive"] = True
+#         poly_layer = compile_diverging_poly_layer(
+#             **layer_opts, **base_kwargs)
+#         responsive_gv_layers = combine_gv_layers(
+#             poly_layer, fill_color=nodata_color, alpha=0.5)
+#         gv_opts["responsive"] = True
+#         export_layers = responsive_gv_layers.opts(**gv_opts)
+#         hv.save(
+#             export_layers,
+#             output / f"html" / f'{store_html}.html', backend='bokeh')
+#         if WEB_DRIVER:
+#             # store also as svg
+#             p =  hv.render(export_layers, backend='bokeh')
+#             p.output_backend = "svg"
+#             export_svgs(
+#                 p, filename=output / f"svg{km_size_str}" / f'{store_html}.svg',
+#                 webdriver=WEB_DRIVER)
+#     if not plot:
+#         return
+#     gv_opts["responsive"] = False
+#     return gv_layers.opts(**gv_opts)
+
+# + tags=["active-ipynb"]
+# hover_items = { 
+#     'User Count (est)':'usercount_est',
+#     'Country Code':'SU_A3'}
+# hover_items_chi = {
+#     f'Total {METRIC_NAME_REF[CHI_COLUMN]}':f'{CHI_COLUMN}_expected',
+#     'Chi-value':'chi_value',
+#     'Chi-significant':'significant',
+#     'Label Cat':'chi_value_cat_label'}
+# hover_items.update(hover_items_chi)  
+# -
+
+# Process data
+
+# + tags=["active-ipynb"]
+# world_flickr_sunset = load_store_country_chi(
+#     topic="sunset", source="flickr", metric="usercount", return_gdf=True)
+
+# + tags=["active-ipynb"]
+# world_flickr_sunrise = load_store_country_chi(
+#     topic="sunrise", source="flickr", metric="usercount", return_gdf=True)
+# -
+
+# Process Instagram data:
+# - expected based on random 20M (`flickrexpected = False`)
+# - or on flickr totals (`flickrexpected = True`)
+
+# + tags=["active-ipynb"]
+# flickrexpected = False
+# world_instagram_sunset = load_store_country_chi(
+#     topic="sunset", source="instagram", metric="usercount", flickrexpected=flickrexpected, return_gdf=True)
+
+# + tags=["active-ipynb"]
+# world_instagram_sunrise = load_store_country_chi(
+#     topic="sunrise", source="instagram", metric="usercount", flickrexpected=flickrexpected, return_gdf=True)
+# -
+
+# Set plotting args
+
+# + tags=["active-ipynb"]
+# kwargs = {
+#     "hover_items":hover_items,
+#     "cmaps_diverging":("OrRd", "Blues"),
+#     "scheme":"Quantiles",
+#     "mask_nonsignificant":False
+# }
+# -
+
+# Get global scheme breaks/classes
+#
+# - the same class breaks will be applied to all *positive chi* values across all four maps
+# - the same class breaks will be applied to all *negative chi* values across all four maps
+
+# + tags=["active-ipynb"]
+# # 1. combine all plus and minus series
+# plus_series_merged, minus_series_merged = get_combine_plus_minus(
+#     [world_flickr_sunset, world_flickr_sunrise, world_instagram_sunset, world_instagram_sunrise])
+# # 2. get classes /breaks for combined series
+# plus_bounds, plus_scheme_breaks = get_gobal_scheme_breaks(plus_series_merged, scheme=kwargs.get("scheme"))
+# minus_bounds, minus_scheme_breaks = get_gobal_scheme_breaks(minus_series_merged, scheme=kwargs.get("scheme"))
+# kwargs["bounds_plusminus"] = (plus_bounds, minus_bounds)
+# kwargs["schemebreaks_plusminus"] = (plus_scheme_breaks, minus_scheme_breaks)
+# -
+
+# Print Legend labels and eval scheme breaks:
+
+# + tags=["active-ipynb"]
+# print(f'Plus: {plus_bounds}')
+# print(f'Plus scheme breaks: {plus_scheme_breaks}')
+# print(f'Minus: {minus_bounds}')
+# print(f'Minus scheme breaks: {minus_scheme_breaks}')
+
+# + tags=["active-ipynb"]
+# world_instagram_sunset['chi_value'].max()
+
+# + tags=["active-ipynb"]
+# title=f'Chi values (over- and underrepresentation): Flickr "Sunset" {METRIC_NAME_REF[CHI_COLUMN]} (estimated) for Countries, 2007-2018'
+# pd.set_option('display.max_colwidth', 500)
+# gv_plot = plot_diverging_poly(
+#     world_flickr_sunset,
+#     title=title,
+#     store_html=f"countries_sunset_flickr_chi_usercount_{kwargs.get('scheme')}", **kwargs)
+# gv_plot
+# -
+
+# > QUANTILES will create attractive maps that place an equal number of observations in each class: If you have 30 counties and 6 data classes, you’ll have 5 counties in each class. The problem with quantiles is that you can end up with classes that have very different numerical ranges (e.g., 1-4, 4-9, 9-250).
+#
+# > NATURAL BREAKS is a kind of “optimal” classification scheme that finds class breaks that will minimize within-class variance and maximize between-class differences. One drawback of this approach is each dataset generates a unique classification solution, and if you need to make comparison across maps, such as in an atlas or a series (e.g., one map each for 1980, 1990, 2000) you might want to use a single scheme that can be applied across all of the maps.
+
+# Compare to matplotlib rendered plot with single color cmap:
+# - define plotting parameter
+
+# + tags=["active-ipynb"]
+# base_kwargs = {
+#     "column":'chi_value',
+#     "edgecolor":'grey',
+#     }
+# all_kwargs = {
+#     "cmap":'OrRd',
+#     "linewidth":0.2,
+#     "legend":True,
+#     "k":9,
+#     "scheme":'quantiles'    
+#     }
+# hatch_kwargs = {
+#     "hatch":"///",
+#     "alpha":0.5,
+#     "facecolor":"none",
+#     "linewidth":0
+#     }
+# -
+
+# - plot in two steps, using linear color gradient and hatch to label underrepresented
+
+# + tags=["active-ipynb"]
+# fig, ax = plt.subplots(1, 1, figsize=(22,28))
+# world_flickr_sunset.plot(
+#     ax=ax, **base_kwargs, **all_kwargs)
+# world_flickr_sunset[world_flickr_sunset['chi_value']<0].plot(
+#     ax=ax, **base_kwargs, **hatch_kwargs)
+# ax.set_title(title)
+
+# + tags=["active-ipynb"]
+# title=f'Chi values (over- and underrepresentation): Flickr "Sunrise" {METRIC_NAME_REF[CHI_COLUMN]} (estimated) for Countries, 2007-2018'
+# gv_plot = plot_diverging_poly(
+#     world_flickr_sunrise,
+#     title=title,
+#     store_html=f"countries_sunrise_flickr_chi_usercount_{kwargs.get('scheme')}", **kwargs)
+# gv_plot
+# -
+
+# Compare to matplotlib rendered plot (without synced/pooled cmap/classes):
+
+# + tags=["active-ipynb"]
+# fig, ax = plt.subplots(1, 1, figsize=(22,28))
+# world_flickr_sunrise.plot(
+#     ax=ax, **base_kwargs, **all_kwargs)
+# world_flickr_sunrise[world_flickr_sunrise['chi_value']<0].plot(
+#     ax=ax, **base_kwargs, **hatch_kwargs)
+# ax.set_title(title)
+
+# + tags=["active-ipynb"]
+# title=f'Chi values (over- and underrepresentation): Instagram "Sunset" {METRIC_NAME_REF[CHI_COLUMN]} (estimated) for Countries, Aug-Dec 2017'
+# gv_plot = plot_diverging_poly(
+#     world_instagram_sunset,
+#     title=title,
+#     store_html=f"countries_sunset_instagram_chi_usercount_{kwargs.get('scheme')}{'_flickrexpected' if flickrexpected else ''}", **kwargs)
+# gv_plot
+# -
+
+# Compare to matplotlib rendered plot (without synced/pooled cmap/classes):
+
+# + tags=["active-ipynb"]
+# fig, ax = plt.subplots(1, 1, figsize=(22,28))
+# world_instagram_sunset.plot(
+#     ax=ax, **base_kwargs, **all_kwargs)
+# world_instagram_sunset[world_instagram_sunset['chi_value']<0].plot(
+#     ax=ax, **base_kwargs, **hatch_kwargs)
+# ax.set_title(title)
+
+# + tags=["active-ipynb"]
+# title=f'Chi values (over- and underrepresentation): Instagram "Sunrise" {METRIC_NAME_REF[CHI_COLUMN]} (estimated) for Countries, Aug-Dec 2017'
+# gv_plot = plot_diverging_poly(
+#     world_instagram_sunrise,
+#     title=title,
+#     store_html=f"countries_sunrise_instagram_chi_usercount_{kwargs.get('scheme')}{'_flickrexpected' if flickrexpected else ''}", **kwargs)
+# gv_plot
+# -
+
+# Compare to matplotlib rendered plot (without synced/pooled cmap/classes):
+
+# + tags=["active-ipynb"]
+# fig, ax = plt.subplots(1, 1, figsize=(22,28))
+# world_instagram_sunrise.plot(
+#     ax=ax, **base_kwargs, **all_kwargs)
+# world_instagram_sunrise[world_instagram_sunrise['chi_value']<0].plot(
+#     ax=ax, **base_kwargs, **hatch_kwargs)
+# ax.set_title(title)
+# -
+
+# world_flickr_sunset### Pooled Classification
+#
+# Create the combined figure for the paper, based on pooled classification.
+#
+# First, combine values into single dataframe.
+
+# + tags=["active-ipynb"]
+# world = world_flickr_sunset
+# world.rename(columns={'chi_value':'flickrsunset'}, inplace=True)
+# world.rename(columns={'significant':'significant_flickrsunset'}, inplace=True)
+# world.rename(columns={'usercount_est':'usercount_est_flickrsunset'}, inplace=True)
+# world.rename(columns={'usercount_est_expected':'usercount_est_expected_flickr'}, inplace=True)
+# world['flickrsunset'] = world['flickrsunset'].astype('float')
+# world['flickrsunrise'] = world_flickr_sunrise['chi_value'].astype('float')
+# world['usercount_est_flickrsunrise'] = world_flickr_sunrise['usercount_est'].astype('float')
+# world['significant_flickrsunrise'] = world_flickr_sunrise['significant']
+# world['instagramsunset'] = world_instagram_sunset['chi_value'].astype('float')
+# world['instagramsunrise'] = world_instagram_sunrise['chi_value'].astype('float')
+# world['significant_instagramsunrise'] = world_instagram_sunrise['significant']
+# world['usercount_est_instagramsunrise'] = world_instagram_sunrise['usercount_est'].astype('float')
+# world['usercount_est_instagramsunset'] = world_instagram_sunset['usercount_est'].astype('float')
+# world['usercount_est_expected_instagram'] = world_instagram_sunset['usercount_est_expected'].astype('float')
+# world['significant_instagramsunset'] = world_instagram_sunset['significant']
+# world.fillna(0, inplace=True)
+# -
+
+# Specify the columns to be used for pooled classification
+
+# + tags=["active-ipynb"]
+# submaps = ["flickrsunrise","flickrsunset","instagramsunrise","instagramsunset"]
+# # Create pooled classification
+# k_classes = 18
+# pooled = mc.Pooled(
+#     world[submaps], classifier='Quantiles', k=k_classes
+# )
+
+# + tags=["active-ipynb"]
+# pooled.global_classifier.bins
+
+# + tags=["active-ipynb"]
+# title_ref = {
+#     "flickrsunset":f'Flickr Sunset',
+#     "flickrsunrise":f'Flickr Sunrise',
+#     "instagramsunset":f'Instagram Sunset',
+#     "instagramsunrise":f'Instagram Sunrise'
+# }
+# -
+
+# The colormap that is used in 100x100km grids (`get_cmap_list()` in `02_visualization.ipynb`) results in two quite dark colors for max (minus and plus).
+#
+# Below, this will be slighlty adapted, with a lighter color. Also, instead of blue, use purple, to not confuse sunset-sunrise meaning of blue/red in other graphics.
+
+# + tags=[]
+def get_diverging_colormap(cmap_diverging:Tuple[str, str], color_count: int = 9):
+    """Create a diverging colormap from two existing with k classes"""
+    div_cmaps: List[List[str]] = []
+    for ix, cmap_name in enumerate(cmap_diverging):
+        if ix == 1:
+            # offset by 1, to darken first color a bit
+            cmap =  plt.cm.get_cmap(cmap_name, color_count+1)
+        cmap = plt.cm.get_cmap(cmap_name, color_count)
+        cmap_list = get_hex_col(cmap)
+        if ix == 0:
+            # set first color as white
+            cmap_list[0] = '#ffffff'
+        if ix == 1:
+            # remove first (too light) color
+            cmap_list.pop(0)
+        div_cmaps.append(cmap_list)
+    div_cmaps[1] = list(reversed(div_cmaps[1]))
+    cmap_nodata_list = div_cmaps[1] + div_cmaps[0]
+    return colors.ListedColormap(cmap_nodata_list)
+# -
+
+# Experiment with values below.
+
+# + tags=["active-ipynb"]
+# # cmaps_diverging: Tuple[str] = ("OrRd", "Purples")
+# cmaps_diverging: Tuple[str] = ("OrRd", "Blues")
+# cmap = get_diverging_colormap(cmaps_diverging, color_count=(k_classes/2)+1)
+
+# + tags=["active-ipynb"]
+# len(cmap.colors)
+# -
+
+# Preview colormap (also useful for legend).
+
+# + tags=["active-ipynb"]
+# tools.display_hex_colors(cmap.colors, as_id=True)
+# -
+
+# Use `False` for legend below to store figure.
+
+# + tags=["active-ipynb"]
+# import matplotlib as mpl
+# # adjust hatch width
+# mpl.rcParams['hatch.linewidth'] = 2
+#
+# all_kwargs = {
+#     "cmap":cmap,
+#     "edgecolor":'grey',
+#     "linewidth":0.2,
+#     "legend":True,   
+#     }
+# hatch_kwargs = {
+#     "hatch":"///",
+#     "alpha":1.0,
+#     "edgecolor":"white",
+#     "facecolor":"none",
+#     "linewidth":0,
+#     }
+# -
+
+# Total number of countries:
+
+# + tags=["active-ipynb"]
+# len(world)
+# -
+
+# Count the number of total and non-significant countries for Flickr sunrise:
+
+# + tags=["active-ipynb"]
+# len(world[world["significant_flickrsunrise"]==False])
+# -
+
+# .. and Flickr sunset:
+
+# + tags=["active-ipynb"]
+# len(world[world["significant_flickrsunset"]==False])
+# -
+
+# Count the number of total and non-significant countries for Instagram sunset:
+
+# + tags=["active-ipynb"]
+# len(world[world["significant_instagramsunset"]==False])
+# -
+
+# Count the number of total and non-significant countries for Instagram sunrise:
+
+# + tags=["active-ipynb"]
+# len(world[world["significant_instagramsunrise"]==False])
+# -
+
+# Print the top 10 non-significant countries sorted by `usercount_est`(decending) for **Flickr/Sunset**:
+
+# + tags=["active-ipynb"]
+# world[world["significant_flickrsunset"]==False].drop(
+#     world.columns.difference(
+#         ["usercount_est_expected_flickr", "usercount_est_flickrsunset", "significant_flickrsunset"]),
+#     axis=1,
+#     inplace=False).sort_values(
+#         ["usercount_est_flickrsunset"], ascending=False).head(10)
+# -
+
+# Print the top 10 non-significant countries sorted by `usercount_est`(decending) for **Instagram/Sunset**:
+
+# + tags=["active-ipynb"]
+# world[world["significant_instagramsunset"]==False].drop(
+#     world.columns.difference(
+#         ["usercount_est_expected_instagram", "usercount_est_instagramsunset", "significant_instagramsunset"]),
+#     axis=1,
+#     inplace=False).sort_values(
+#         ["usercount_est_instagramsunset"], ascending=False).head(10)
+# -
+
+# These are all pretty small countries or islands. Lets compare the area/size of non-significant cpuntries
+
+# + tags=["active-ipynb"]
+# area_instagramsunset_nonsignificant = \
+#     world.loc[(world["significant_instagramsunset"]==False), 'geometry'].area.sum()
+# area_instagramsunset_significant = \
+#     world.loc[(world["significant_instagramsunset"]==True), 'geometry'].area.sum()
+# percentage_sunset = area_instagramsunset_nonsignificant/(area_instagramsunset_significant/100)
+
+# + tags=["active-ipynb"]
+# print(f'{area_instagramsunset_significant/1000000:,.0f} km² significant')
+# print(f'{area_instagramsunset_nonsignificant/1000000:,.0f} km² non-significant')
+# print(f'{percentage_sunset:.0f}%')
+
+# + tags=["active-ipynb"]
+# fig, axs = plt.subplots(2, 2, figsize=(22, 22))
+#
+# # Flatten the array of axis so you can loop over
+# # in one dimension
+# axs = axs.flatten()
+# # Loop over each map
+# topic = "flickr"
+# for i, col in enumerate(submaps):
+#     if i >= 2:
+#         topic = "instagram"
+#     if (i % 2) == 0:
+#         topicsel = f'{topic}sunset'
+#     else:
+#         topicsel = f'{topic}sunrise'
+#     world.plot(
+#         col,                  # Year to plot
+#         scheme='UserDefined', # Use our own bins
+#         classification_kwds={ # Use global bins
+#             'bins': pooled.global_classifier.bins
+#         }, 
+#         ax=axs[i],             # Plot on the corresponding axis
+#         **all_kwargs
+#     )
+#     # hatch non-significant
+#     world[world[f"significant_{topicsel}"]==False].plot(
+#         ax=axs[i], **hatch_kwargs)
+#     # Remove axis
+#     axs[i].set_axis_off()
+#     # Name the subplot with the name of the column
+#     if all_kwargs.get("legend"):
+#         axs[i].set_title(title_ref.get(col))
+# fig.subplots_adjust(hspace=-0.7)
+# # Tight layout to better use space
+# plt.tight_layout()
+# # Display figure
+# plt.show()
+# if not all_kwargs.get("legend"):
+#     fig.savefig(
+#         OUTPUT / "figures" / "country_chi.png", dpi=300, format='PNG',
+#         bbox_inches='tight', pad_inches=1, facecolor="white")
+#     # also save as svg
+#     fig.savefig(
+#         OUTPUT / "svg" / "country_chi.svg", format='svg',
+#         bbox_inches='tight', pad_inches=1, facecolor="white")
+# -
 
 # # Close DB connection & Create notebook HTML
 
@@ -940,4 +1714,4 @@ def convert_gdf_to_gvpolygons(
 # !cp ../out/html/05_countries.html ../resources/html/
 # -
 
-#
+

@@ -6,6 +6,9 @@ The notebooks are stored as markdown files with [jupytext][1] for better git com
 
 These notebooks can be run with [jupyterlab-docker][2].
 
+All figures (png, pdf, interactive html, svg) available in the [resources folder](https://github.com/anonymous-peer12345/anonymous-peer12345.github.io/tree/main/resources).
+
+Notebooks (ipynb) can be found in the [notebooks](https://github.com/anonymous-peer12345/anonymous-peer12345.github.io/tree/main/notebooks) folder.
 ## Results
 
 In addition to the [resource](/resources/html/) folder, the latest HTML converts of notebooks are also available here:

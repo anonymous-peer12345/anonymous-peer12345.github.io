@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # ---
 # jupyter:
 #   jupytext:
@@ -6,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.11.2
+#       jupytext_version: 1.14.0
 #   kernelspec:
 #     display_name: worker_env
 #     language: python
@@ -24,7 +23,8 @@
 # from datetime import date
 #
 # today = date.today()
-# md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+# with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+# md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 # -
 
 # Visualization of TFIDF and Cosine Similarity Values
@@ -43,8 +43,9 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 # import all previous chained notebooks
 from _05_countries import *
-
 from modules import preparations
+preparations.init_imports()
+WEB_DRIVER = preparations.load_chromedriver()
 
 # Activate autoreload of changed python files:
 
@@ -54,12 +55,8 @@ from modules import preparations
 # ## Load aggregate topic data
 #
 # Data is stored as aggregate HLL data (postcount) for each term.
-#
-# There is an additional CSV that contains the HLL set with all Flickr posts (2007-2018).
 
 root = Path.cwd().parents[1] / "00_topic_data"
-TERMS_INSTAGRAM_TFIDF = root / "20210204_INSTAGRAM_SUNSET_random_country_tf_idf.csv"
-# TERMS_INSTAGRAM_COSINE = root / "20211029_INSTAGRAM_SUNSET_random_country_cosine_similarity_binary.csv"
 TERMS_FLICKR_TFIDF = root / "20210202_FLICKR_SUNSET_random_country_tf_idf.csv"
 TERMS_FLICKR_COSINE = root / "20211029_FLICKR_SUNSET_random_country_cosine_similarity_binary.csv"
 
@@ -67,8 +64,6 @@ TERMS_FLICKR_COSINE = root / "20211029_FLICKR_SUNSET_random_country_cosine_simil
 
 # %%time
 data_files = {
-    "TERMS_INSTAGRAM_TFIDF":TERMS_INSTAGRAM_TFIDF,
-    # "TERMS_INSTAGRAM_COSINE":TERMS_INSTAGRAM_COSINE,
     "TERMS_FLICKR_TFIDF":TERMS_FLICKR_TFIDF,
     "TERMS_FLICKR_COSINE":TERMS_FLICKR_COSINE,
     }
@@ -147,7 +142,7 @@ def load_combine(su_a3_ref: str, value_df: pd.DataFrame):
     world.loc[value_df.index, "cosine"] = value_df[su_a3_ref]
     # Set selected country to NaN, which is always 1 
     # and can therefore be excluded from the classification process
-    world.loc["UGA", "cosine"] = np.nan
+    world.loc[su_a3_ref, "cosine"] = np.nan
     # add tfidf values
     world.loc[df_tfidf.index, "tfidf"] = df_tfidf['tfidf']
     world.tfidf = world.tfidf.fillna('')
@@ -253,7 +248,7 @@ def get_classify_poly(poly_gdf: gp.GeoDataFrame,
         grid=poly_gdf, metric=metric, **kwargs)
     # classify values
     bounds, scheme_breaks = classify_data(
-        values_series=series_nan, scheme=scheme, cmap_name=cmap_name)
+        values_series=series_nan, scheme=scheme)
     # assign categories column
     poly_gdf.loc[series_nan.index, f'{metric}_cat'] = scheme_breaks.find_bin(
         series_nan)
@@ -489,9 +484,17 @@ def plot_interactive_cosine(
         responsive_gv_layers = gv.Overlay(
             [poly_layer, sel_poly_layer])
         gv_opts["responsive"] = True
+        export_layers = responsive_gv_layers.opts(**gv_opts)
         hv.save(
-            responsive_gv_layers.opts(**gv_opts),
+            export_layers,
             output / f"html" / f'{store_html}.html', backend='bokeh')
+        if WEB_DRIVER:
+            # store also as svg
+            p =  hv.render(export_layers, backend='bokeh')
+            p.output_backend = "svg"
+            export_svgs(
+                p, filename=output / f"svg{km_size_str}" / f'{store_html}.svg',
+                webdriver=WEB_DRIVER)
     if not plot:
         return
     gv_opts["responsive"] = False

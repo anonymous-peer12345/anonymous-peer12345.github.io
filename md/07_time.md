@@ -5,7 +5,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.13.7
+      jupytext_version: 1.14.0
   kernelspec:
     display_name: worker_env
     language: python
@@ -19,12 +19,13 @@ _<a href= "mailto:alexander.dunkel@tu-dresden.de">Alexander Dunkel</a>, TU Dresd
 
 ----------------
 
-```python tags=["active-ipynb", "hide_code"]
+```python tags=["active-ipynb", "hide_code"] jupyter={"source_hidden": true}
 from IPython.display import Markdown as md
 from datetime import date
 
 today = date.today()
-md(f"Last updated: {today.strftime('%b-%d-%Y')}")
+with open('/.version', 'r') as file: app_version = file.read().split("'")[1]
+md(f"Last updated: {today.strftime('%b-%d-%Y')}, [Carto-Lab Docker](https://gitlab.vgiscience.de/lbsn/tools/jupyterlab) Version {app_version}")
 ```
 
 A brief look at the temporal distribution of the collected sunset/sunrise data.
@@ -47,6 +48,7 @@ module_path = str(Path.cwd().parents[0] / "py")
 if module_path not in sys.path:
     sys.path.append(module_path)
 from modules import tools
+from _03_chimaps import OUTPUT
 ```
 
 ## Load HLL aggregate data
@@ -207,7 +209,7 @@ def bar_plot_time(
             label=label, edgecolor="white", linewidth=0.5, alpha=0.8)
     return ax
 
-def plot_time(dfs: Tuple[pd.DataFrame, pd.DataFrame], title):
+def plot_time(dfs: Tuple[pd.DataFrame, pd.DataFrame], title, filename = None, output = OUTPUT):
     """Create dataframe(s) time plot"""
     fig, ax = plt.subplots()
     fig.set_size_inches(15.7, 4.27)
@@ -234,6 +236,15 @@ def plot_time(dfs: Tuple[pd.DataFrame, pd.DataFrame], title):
     h, l = ax.get_legend_handles_labels()
     ax.legend(h, l, frameon=False, loc='center left', bbox_to_anchor=(1, 0.5))
     ax.set_title(title)
+    # store figure to file
+    if filename:
+        fig.savefig(
+            output / "figures" / f"{filename}.png", dpi=300, format='PNG',
+            bbox_inches='tight', pad_inches=1, facecolor="white")
+        # also save as svg
+        fig.savefig(
+            output / "svg" / f"{filename}.svg", format='svg',
+            bbox_inches='tight', pad_inches=1, facecolor="white")
 ```
 
 Plot sunset and sunrise for both Instagram and Flickr collected data.
@@ -241,13 +252,15 @@ Plot sunset and sunrise for both Instagram and Flickr collected data.
 ```python
 plot_time(
     dfs = (dfs["SUNSET_INSTAGRAM"], dfs["SUNRISE_INSTAGRAM"]),
-    title='Instagram sunset and sunrise reactions')
+    title='Instagram sunset and sunrise reactions', 
+    filename="temporal_analysis_instagram")
 ```
 
 ```python
 plot_time(
     dfs = (dfs["SUNSET_FLICKR"], dfs["SUNRISE_FLICKR"]),
-    title='Flickr sunset and sunrise reactions')
+    title='Flickr sunset and sunrise reactions', 
+    filename="temporal_analysis_flickr")
 ```
 
 # Create notebook HTML
